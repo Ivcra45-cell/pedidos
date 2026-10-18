@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pedidos y Catálogo</title>
+<meta name="theme-color" content="#1c6b50">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="login" hidden>
+  <div class="auth">
+    <h1 class="auth-t">Pedidos y catálogo</h1>
+    <p class="muted" id="auth-sub">Entrá con tu email y contraseña.</p>
+    <form id="auth-form">
+      <label class="field" id="a-email-w">Email
+        <input type="email" id="a-email" autocomplete="email" inputmode="email" required>
+      </label>
+      <label class="field">
+        <span id="a-pass-l">Contraseña</span>
+        <input type="password" id="a-pass" autocomplete="current-password" minlength="6" required>
+      </label>
+      <div class="err" id="a-msg" role="alert"></div>
+      <button class="btn primary" id="a-go" type="submit">Entrar</button>
+    </form>
+    <button class="ghost" id="a-toggle" type="button">Primera vez: crear mi cuenta</button>
+    <button class="ghost" id="a-forgot" type="button">Olvidé mi contraseña</button>
+  </div>
+</section>
+
+<section id="denied" hidden>
+  <div class="auth">
+    <h1 class="auth-t">Sin acceso</h1>
+    <p>La cuenta <b id="denied-mail"></b> todavía no está autorizada para usar esta app. Pedile a alguien del equipo que la agregue en Ajustes, o entrá con otro email.</p>
+    <button class="btn" id="denied-out" type="button">Cerrar sesión</button>
+  </div>
+</section>
+
+<div id="app" hidden>
+  <header class="top">
+    <h1 id="ttl">Pedidos y mercadería</h1>
+    <button id="bell" data-act="bell" aria-label="Avisos"></button>
+  </header>
+  <div id="toolbar"></div>
+  <main id="view"><div id="list"></div></main>
+</div>
+
+<button id="fab" data-act="fab" hidden></button>
+
+<nav hidden><div class="in">
+  <button data-act="tab" data-v="pedidos" id="n-pedidos"><svg class="ic" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Pedidos</button>
+  <button data-act="tab" data-v="merc" id="n-merc"><svg class="ic" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Mercadería</button>
+  <button data-act="tab" data-v="cat" id="n-cat"><svg class="ic" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3V4z"/><path d="M5 17a3 3 0 013-3h11"/></svg>Catálogo</button>
+  <button data-act="tab" data-v="ajustes" id="n-ajustes"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Ajustes</button>
+</div></nav>
+<div id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
