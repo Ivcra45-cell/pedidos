@@ -22,7 +22,7 @@ if (!window.supabase || !CFG.url || !CFG.key) {
 var sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 var me = { id: null, email: '', nombre: '' };
-var S = { prods: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
+var S = { prods: [], clientes: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
 var stack = [];
 var deferredInstall = null;
 var loadT = Date.now();
@@ -36,6 +36,18 @@ function unread() { return S.avisos.filter(function (a) { return a.t > seen() &&
 function who(por, nombre) { return por === me.id ? 'Vos' : (nombre || 'Familia'); }
 function cats() { var o = {}; S.prods.forEach(function (p) { o[p.categoria || 'Sin categoría'] = 1; }); return Object.keys(o).sort(function (a, b) { return a.localeCompare(b, 'es'); }); }
 function dlist(id, arr) { return '<datalist id="' + id + '">' + arr.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>'; }
+/* clientes: se muestra el nombre fantasía (el local); si no tiene, el nombre */
+function cliNom(c) { return c.fantasia || c.nombre; }
+function cliEtiquetas() {
+  var base = S.clientes.map(function (c) { return cliNom(c) + (c.fantasia && c.nombre && c.fantasia.toLowerCase() !== c.nombre.toLowerCase() ? ' · ' + c.nombre : ''); });
+  return S.clientes.map(function (c, i) {
+    var dup = base.filter(function (b) { return b.toLowerCase() === base[i].toLowerCase(); }).length > 1;
+    return { c: c, v: base[i] + (dup ? ' (' + (c.doc || c.tel || c.dir || c.id.slice(0, 4)) + ')' : '') };
+  });
+}
+function cliLinea(c) { return [c.tel, c.doc, c.dir].filter(Boolean).join(' · '); }
+function telHref(t) { return 'tel:' + String(t || '').replace(/[^\d+]/g, ''); }
+function mapHref(d) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d); }
 function faltasTxt(l) { return l && l.length ? ' Stock insuficiente: ' + l.map(function (x) { return x.nombre + ' (faltan ' + x.faltan + ')'; }).join(', ') + '.' : ''; }
 function errMsg(e, def) {
   var m = (e && (e.message || e.error_description)) || '';
@@ -104,7 +116,7 @@ async function subirFoto(carpeta, blob) {
 /* ---------- datos ---------- */
 function mapPedido(r) {
   return {
-    id: r.id, numero: Number(r.numero), cliente: r.cliente, fecha: r.fecha, estado: r.estado, nota: r.nota || '',
+    id: r.id, numero: Number(r.numero), cliente: r.cliente, clienteId: r.cliente_id || null, fecha: r.fecha, estado: r.estado, nota: r.nota || '',
     ticket: r.ticket_path || null, total: Number(r.total) || 0, creadoPor: r.creado_por,
     items: (r.pedido_items || []).slice().sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); }).map(function (i) {
       return { pid: i.producto_id, nombre: i.nombre, precio: Number(i.precio) || 0, cant: i.cantidad, desc: i.descontado || 0 };
@@ -120,7 +132,8 @@ async function cargar() {
     sb.from('pedidos').select('*, pedido_items(*), pedido_historial(*)').order('numero', { ascending: false }).limit(500),
     sb.from('avisos').select('*').order('creado_en', { ascending: false }).limit(60),
     sb.from('negocio').select('*').eq('id', 1).maybeSingle(),
-    sb.from('miembros').select('*').order('creado_en')
+    sb.from('miembros').select('*').order('creado_en'),
+    sb.from('clientes').select('*').order('nombre')
   ]);
   var bad = r.find(function (x) { return x.error; });
   if (bad) { S.err = bad.error.message || 'error'; throw bad.error; }
@@ -134,6 +147,9 @@ async function cargar() {
   });
   S.cfg = r[3].data || { nombre: '' };
   S.miembros = r[4].data || [];
+  S.clientes = (r[5].data || []).map(function (c) {
+    return { id: c.id, nombre: c.nombre || '', fantasia: c.nombre_fantasia || '', tel: c.telefono || '', doc: c.documento || '', dir: c.direccion || '' };
+  });
   S.ok = true;
 }
 var recT;
@@ -151,6 +167,7 @@ function suscribir() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, recargar)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, recargar)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'negocio' }, recargar)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargar)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'avisos' }, function (pl) {
       var a = pl.new || {};
       if (a.por !== me.id) {
@@ -242,12 +259,15 @@ function drawTop() {
   $('#ttl').textContent = S.cfg.nombre || 'Pedidos y mercadería';
 }
 function drawTab() {
-  ['pedidos', 'merc', 'cat', 'ajustes'].forEach(function (k) { $('#n-' + k).classList.toggle('on', S.tab === k); });
+  ['pedidos', 'clientes', 'merc', 'cat', 'ajustes'].forEach(function (k) { $('#n-' + k).classList.toggle('on', S.tab === k); });
   var tb = $('#toolbar'), fab = $('#fab');
   if (S.tab === 'pedidos') {
     tb.innerHTML = '<input type="search" id="q" placeholder="Buscar cliente o número" value="' + esc(S.q) + '" aria-label="Buscar pedidos">' +
       '<div class="chips">' + [['todos', 'Todos'], ['pendiente', 'Pendientes'], ['entregado', 'Entregados'], ['cancelado', 'Cancelados']].map(function (c) { return '<button class="chip' + (S.filtro === c[0] ? ' on' : '') + '" data-act="filt" data-v="' + c[0] + '">' + c[1] + '</button>'; }).join('') + '</div>';
     fab.innerHTML = IC_PLUS + 'Nuevo pedido'; fab.hidden = false;
+  } else if (S.tab === 'clientes') {
+    tb.innerHTML = '<input type="search" id="q" placeholder="Buscar por nombre, teléfono, cédula o RUC" value="' + esc(S.q) + '" aria-label="Buscar clientes">';
+    fab.innerHTML = IC_PLUS + 'Nuevo cliente'; fab.hidden = false;
   } else if (S.tab === 'merc') {
     tb.innerHTML = '<input type="search" id="q" placeholder="Buscar producto" value="' + esc(S.q) + '" aria-label="Buscar productos">' +
       '<div class="chips">' + ['todas'].concat(cats()).map(function (c) { return '<button class="chip' + (S.cat === c ? ' on' : '') + '" data-act="cat" data-v="' + esc(c) + '">' + (c === 'todas' ? 'Todas' : esc(c)) + '</button>'; }).join('') + '</div>';
@@ -261,7 +281,7 @@ function drawList() {
   var L = $('#list');
   if (S.err && !S.ok) { L.innerHTML = '<div class="empty">No se pudo leer la información (' + esc(S.err) + '). Revisá la conexión y recargá la página.</div>'; return; }
   if (!S.ok) { L.innerHTML = '<p class="muted">Cargando…</p>'; return; }
-  L.innerHTML = S.tab === 'pedidos' ? vPedidos() : S.tab === 'merc' ? vMerc() : S.tab === 'cat' ? vCat() : vAjustes();
+  L.innerHTML = S.tab === 'pedidos' ? vPedidos() : S.tab === 'clientes' ? vClientes() : S.tab === 'merc' ? vMerc() : S.tab === 'cat' ? vCat() : vAjustes();
   var biz = $('#biz'); if (biz) biz.value = S.cfg.nombre || '';
 }
 function drawAll() {
@@ -286,6 +306,24 @@ function vPedidos() {
       '<span class="slip-main"><strong>' + esc(p.cliente) + '</strong><span class="pill ' + esc(p.estado) + '">' + esc(ESTADO[p.estado] || p.estado) + '</span>' +
       '<span class="meta">' + fdia(p.fecha) + ' · ' + n + ' ítem' + (n === 1 ? '' : 's') + (mod ? ' · <em>modificado</em>' : '') + '</span>' +
       '<span class="amt">' + money(p.total) + '</span></span></button>';
+  }).join('') + '</div>';
+}
+function vClientes() {
+  var q = S.q.trim().toLowerCase(), qd = q.replace(/[^0-9a-z]/g, '');
+  var l = S.clientes.filter(function (c) {
+    if (!q) return true;
+    var txt = [c.nombre, c.fantasia, c.tel, c.doc, c.dir].join(' ').toLowerCase();
+    return txt.indexOf(q) >= 0 || (qd && (c.doc + c.tel).toLowerCase().replace(/[^0-9a-z]/g, '').indexOf(qd) >= 0);
+  }).sort(function (a, b) { return cliNom(a).localeCompare(cliNom(b), 'es'); });
+  if (!l.length) return S.clientes.length ? '<div class="empty">No hay clientes que coincidan.</div>' :
+    '<div class="empty"><span>Todavía no hay clientes. Cargá cada uno una sola vez (nombre, local, teléfono, cédula o RUC y dirección) y después lo elegís al hacer un pedido.</span><button class="btn primary" data-act="fab">Cargar el primer cliente</button></div>';
+  return '<div class="list">' + l.map(function (c) {
+    var n = S.peds.filter(function (p) { return p.clienteId === c.id; }).length;
+    return '<button class="cli" data-act="editcli" data-id="' + esc(c.id) + '"><span class="ph cini">' + esc(cliNom(c).trim().charAt(0).toUpperCase()) + '</span>' +
+      '<span class="cli-b"><strong>' + esc(cliNom(c)) + '</strong>' +
+      (c.fantasia && c.nombre && c.fantasia.toLowerCase() !== c.nombre.toLowerCase() ? '<span>' + esc(c.nombre) + '</span>' : '') +
+      (cliLinea(c) ? '<small>' + esc(cliLinea(c)) + '</small>' : '<small>Sin más datos</small>') +
+      '</span><span class="cli-n">' + n + '<small>pedido' + (n === 1 ? '' : 's') + '</small></span></button>';
   }).join('') + '</div>';
 }
 function stockTxt(p) {
@@ -352,7 +390,14 @@ function detailHTML(p, rec) {
   var items = p.items.map(function (i) { return '<li><span>' + esc(i.nombre) + '<small>' + i.cant + ' × ' + money(i.precio) + (i.desc > 0 ? ' · stock −' + i.desc : '') + '</small></span><b>' + money(i.cant * i.precio) + '</b></li>'; }).join('');
   var est = ['pendiente', 'entregado', 'cancelado'].map(function (k) { return '<button class="seg' + (p.estado === k ? ' on' : '') + '" data-act="setestado" data-id="' + esc(p.id) + '" data-v="' + k + '">' + ESTADO[k] + '</button>'; }).join('');
   var hist = p.historial.slice().reverse().map(function (h) { return '<li><time>' + ftime(h.t) + '</time><span><b>' + esc(who(h.por, h.nombre)) + '</b> · ' + esc(h.txt) + '</span></li>'; }).join('');
-  return '<div><h3 class="big">' + esc(p.cliente) + '</h3><p class="muted" style="margin:4px 0 0">' + fdia(p.fecha) + '</p></div>' +
+  var cl = p.clienteId && S.clientes.find(function (x) { return x.id === p.clienteId; });
+  var clBox = cl ? '<div class="box cli-det">' +
+    (cl.nombre && cl.nombre !== p.cliente ? '<div><small>Nombre</small>' + esc(cl.nombre) + '</div>' : '') +
+    (cl.tel ? '<div><small>Teléfono</small><a href="' + esc(telHref(cl.tel)) + '">' + esc(cl.tel) + '</a></div>' : '') +
+    (cl.doc ? '<div><small>Cédula / RUC</small>' + esc(cl.doc) + '</div>' : '') +
+    (cl.dir ? '<div><small>Dirección</small>' + esc(cl.dir) + ' · <a href="' + esc(mapHref(cl.dir)) + '" target="_blank" rel="noopener">Ver en el mapa</a></div>' : '') +
+    '</div>' : '';
+  return '<div><h3 class="big">' + esc(p.cliente) + '</h3><p class="muted" style="margin:4px 0 0">' + fdia(p.fecha) + '</p></div>' + (clBox.indexOf('<div><small>') >= 0 ? clBox : '') +
     '<div class="seg-w">' + est + '</div>' +
     '<div class="box"><ul class="items">' + items + '</ul><div class="totrow"><span>Total</span><span>' + money(p.total) + '</span></div></div>' +
     (p.nota ? '<div class="box"><b>Nota</b><div style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(p.nota) + '</div></div>' : '') +
@@ -407,10 +452,15 @@ function bindFoto(root, onFile, onQuit) {
 function openPedidoForm(p) {
   var f = { items: p ? p.items.map(function (i) { return { pid: i.pid, nombre: i.nombre, precio: i.precio, cant: i.cant }; }) : [], ticket: p ? p.ticket : null, blob: null, preview: null };
   openSheet(p ? 'Editar pedido Nº ' + pad(p.numero) : 'Nuevo pedido', function (rec) {
-    var clientes = S.peds.map(function (x) { return x.cliente; }).filter(function (c, i, a) { return c && a.indexOf(c) === i; });
+    var etq = cliEtiquetas();
+    var cid = p ? p.clienteId : null;
+    if (cid && !S.clientes.some(function (c) { return c.id === cid; })) cid = null;
+    var cini = cid ? (etq.find(function (e) { return e.c.id === cid; }) || {}).v : '';
+    if (!cini && p) { var m0 = etq.find(function (e) { return cliNom(e.c).toLowerCase() === (p.cliente || '').toLowerCase(); }); if (m0) { cid = m0.c.id; cini = m0.v; } }
     var prods = S.prods.slice().sort(function (a, b) { return (a.nombre || '').localeCompare(b.nombre || '', 'es'); });
     rec.body.innerHTML =
-      '<label class="field">Cliente<input type="text" id="f-cliente" list="dl-cli" autocomplete="off" value="' + esc(p ? p.cliente : '') + '"></label>' + dlist('dl-cli', clientes) +
+      '<label class="field">Cliente<input type="text" id="f-cliente" list="dl-cli" autocomplete="off" placeholder="Escribí el nombre o el local…" value="' + esc(cini || (p ? p.cliente : '')) + '"></label>' + dlist('dl-cli', etq.map(function (e) { return e.v; })) +
+      '<div class="cli-pick"><span class="muted" id="f-cinfo"></span><button class="btn" id="f-newcli" type="button">+ Nuevo cliente</button></div>' +
       '<label class="field">Fecha<input type="date" id="f-fecha" value="' + esc(p ? p.fecha : hoy()) + '"></label>' +
       '<h3 class="sec">Mercadería</h3><div class="box" id="f-items"></div>' +
       '<datalist id="dl-prod">' + prods.map(function (x) { return '<option value="' + esc(x.nombre) + '" label="' + esc(money(x.precio) + (x.stock != null ? ' · stock ' + x.stock : '')) + '"></option>'; }).join('') + '</datalist>' +
@@ -422,6 +472,20 @@ function openPedidoForm(p) {
       '<div class="err" id="f-err" role="alert"></div>' +
       '<button class="btn primary" id="f-save" type="button">' + (p ? 'Guardar cambios' : 'Guardar pedido') + '</button>';
     var $f = function (s) { return rec.body.querySelector(s); };
+    function paintCli() {
+      var e = etq.find(function (x) { return x.c.id === cid; }), info = $f('#f-cinfo');
+      info.textContent = e ? (cliLinea(e.c) || 'Cliente elegido') : (($f('#f-cliente').value.trim()) ? 'Elegí un cliente de la lista o creá uno nuevo.' : '');
+    }
+    function pickCli() {
+      var v = $f('#f-cliente').value.trim().toLowerCase();
+      var e = v && etq.find(function (x) { return x.v.toLowerCase() === v; });
+      if (!e && v) { var c2 = etq.filter(function (x) { return cliNom(x.c).toLowerCase() === v; }); if (c2.length === 1) e = c2[0]; }
+      cid = e ? e.c.id : null; paintCli();
+    }
+    $f('#f-cliente').addEventListener('input', pickCli);
+    $f('#f-newcli').addEventListener('click', function () {
+      openClienteForm(null, function (nc) { etq = cliEtiquetas(); $f('#dl-cli').innerHTML = etq.map(function (x) { return '<option value="' + esc(x.v) + '">'; }).join(''); var e = etq.find(function (x) { return x.c.id === nc.id; }); cid = nc.id; $f('#f-cliente').value = e ? e.v : cliNom(nc); paintCli(); }, $f('#f-cliente').value.trim());
+    });
     function total() { return f.items.reduce(function (s, i) { return s + (Number(i.precio) || 0) * (Number(i.cant) || 0); }, 0); }
     function paintTotal() { $f('#f-total').textContent = money(total()); }
     function paintItems() {
@@ -468,11 +532,13 @@ function openPedidoForm(p) {
       }, function () { if (f.preview) URL.revokeObjectURL(f.preview); f.blob = null; f.preview = null; f.ticket = null; paintTk(); });
     }
     rec.onClose = function () { if (f.preview) URL.revokeObjectURL(f.preview); };
-    paintItems(); paintTk();
+    paintItems(); paintTk(); paintCli();
     $f('#f-save').addEventListener('click', async function () {
       var btn = $f('#f-save'), err = $f('#f-err'); err.textContent = '';
-      var cliente = $f('#f-cliente').value.trim();
-      if (!cliente) { err.textContent = 'Escribí el nombre del cliente.'; $f('#f-cliente').focus(); return; }
+      pickCli();
+      var cEl = etq.find(function (x) { return x.c.id === cid; });
+      if (!cEl) { err.textContent = $f('#f-cliente').value.trim() ? 'Elegí un cliente de la lista o tocá «+ Nuevo cliente».' : 'Elegí el cliente del pedido.'; $f('#f-cliente').focus(); return; }
+      var cliente = cliNom(cEl.c);
       if (!f.items.length) { err.textContent = 'Agregá al menos un producto.'; return; }
       btn.disabled = true; btn.textContent = 'Guardando…';
       try {
@@ -491,7 +557,7 @@ function openPedidoForm(p) {
         var r = await sb.rpc('guardar_pedido', {
           p_id: p ? p.id : null, p_cliente: cliente, p_fecha: data.fecha, p_nota: data.nota, p_ticket: ticket,
           p_items: items.map(function (i) { return { producto_id: i.pid, nombre: i.nombre, precio: i.precio, cantidad: i.cant }; }),
-          p_resumen: resumen, p_por_nombre: me.nombre
+          p_resumen: resumen, p_por_nombre: me.nombre, p_cliente_id: cid
         });
         if (r.error) throw r.error;
         var fl = (r.data && r.data.faltas) || [];
@@ -501,6 +567,50 @@ function openPedidoForm(p) {
         btn.disabled = false; btn.textContent = p ? 'Guardar cambios' : 'Guardar pedido';
         err.textContent = errMsg(e, 'No se pudo guardar. Revisá la conexión y probá de nuevo.');
       }
+    });
+  }, 'Cancelar');
+}
+
+/* ---------- formulario de cliente ---------- */
+function openClienteForm(c, onSaved, nombreIni) {
+  var f = { confirm: false };
+  openSheet(c ? 'Editar cliente' : 'Nuevo cliente', function (rec) {
+    rec.body.innerHTML =
+      '<label class="field">Nombre y apellido<input type="text" id="c-nom" autocomplete="off" placeholder="Ej.: María González" value="' + esc(c ? c.nombre : (nombreIni || '')) + '"></label>' +
+      '<label class="field">Nombre de fantasía (nombre del local)<input type="text" id="c-fan" autocomplete="off" placeholder="Ej.: Despensa Los Pinos" value="' + esc(c ? c.fantasia : '') + '"></label>' +
+      '<label class="field">Teléfono<input type="tel" id="c-tel" inputmode="tel" autocomplete="off" placeholder="Ej.: 0981 123 456" value="' + esc(c ? c.tel : '') + '"></label>' +
+      '<label class="field">Cédula o RUC<input type="text" id="c-doc" autocomplete="off" placeholder="Ej.: 1234567 o 80012345-6" value="' + esc(c ? c.doc : '') + '"></label>' +
+      '<label class="field">Dirección<textarea id="c-dir" rows="2" placeholder="Calle, número, barrio, ciudad">' + esc(c ? c.dir : '') + '</textarea></label>' +
+      (c && (c.tel || c.dir) ? '<div class="acts">' + (c.tel ? '<a class="btn" href="' + esc(telHref(c.tel)) + '">Llamar</a>' : '') + (c.dir ? '<a class="btn" href="' + esc(mapHref(c.dir)) + '" target="_blank" rel="noopener">Ver en el mapa</a>' : '') + '</div>' : '') +
+      '<div class="err" id="c-err" role="alert"></div>' +
+      '<button class="btn primary" id="c-save" type="button">Guardar cliente</button>' +
+      (c ? '<button class="btn danger" id="c-del" type="button">Eliminar cliente</button>' : '');
+    var $c = function (s) { return rec.body.querySelector(s); };
+    $c('#c-save').addEventListener('click', async function () {
+      var btn = $c('#c-save'), err = $c('#c-err'); err.textContent = '';
+      var row = { nombre: $c('#c-nom').value.trim(), nombre_fantasia: $c('#c-fan').value.trim() || null, telefono: $c('#c-tel').value.trim() || null, documento: $c('#c-doc').value.trim() || null, direccion: $c('#c-dir').value.trim() || null };
+      if (!row.nombre) { err.textContent = 'Escribí el nombre del cliente.'; $c('#c-nom').focus(); return; }
+      btn.disabled = true; btn.textContent = 'Guardando…';
+      try {
+        var r = c ? await sb.from('clientes').update(row).eq('id', c.id).select().single() : await sb.from('clientes').insert(row).select().single();
+        if (r.error) throw r.error;
+        var d = r.data, nc = { id: d.id, nombre: d.nombre || '', fantasia: d.nombre_fantasia || '', tel: d.telefono || '', doc: d.documento || '', dir: d.direccion || '' };
+        var k = S.clientes.findIndex(function (x) { return x.id === nc.id; });
+        if (k >= 0) S.clientes[k] = nc; else S.clientes.push(nc);
+        toast('Cliente guardado.'); closeSheet();
+        if (onSaved) onSaved(nc);
+        drawAll(); recargar();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Guardar cliente';
+        err.textContent = /duplicate|unique|23505/i.test((e && (e.message + (e.code || ''))) || '') ? 'Ya hay un cliente con esa cédula o RUC.' : 'No se pudo guardar. Revisá la conexión y probá de nuevo.';
+      }
+    });
+    var d = $c('#c-del');
+    if (d) d.addEventListener('click', async function () {
+      if (!f.confirm) { f.confirm = true; d.textContent = 'Tocá otra vez para eliminar'; d.classList.add('arm'); setTimeout(function () { if (d.isConnected) { f.confirm = false; d.textContent = 'Eliminar cliente'; d.classList.remove('arm'); } }, 4000); return; }
+      var r = await sb.from('clientes').delete().eq('id', c.id);
+      if (r.error) { $c('#c-err').textContent = 'No se pudo eliminar.'; return; }
+      toast('Cliente eliminado. Sus pedidos anteriores conservan el nombre.'); closeSheet(); recargar();
     });
   }, 'Cancelar');
 }
@@ -646,6 +756,13 @@ async function pdfPedido(p, imprimir) {
     doc.setDrawColor(200); doc.line(M, 38, W - M, 38);
     doc.setFontSize(9); doc.text('CLIENTE', M, 46); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(24, 35, 29); doc.text(doc.splitTextToSize(p.cliente || '', W - 2 * M), M, 53);
     var y = 66;
+    var cl = p.clienteId && S.clientes.find(function (x) { return x.id === p.clienteId; });
+    if (cl) {
+      var dl = [cl.nombre && cl.nombre !== p.cliente ? cl.nombre : '', cl.tel ? 'Tel.: ' + cl.tel : '', cl.doc ? 'C.I. / RUC: ' + cl.doc : '', cl.dir ? 'Dirección: ' + cl.dir : ''].filter(Boolean);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(90, 102, 93);
+      dl.forEach(function (t) { var ls2 = doc.splitTextToSize(t, W - 2 * M); doc.text(ls2, M, y - 6); y += ls2.length * 5; });
+      if (dl.length) y += 2;
+    }
     function th() { doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(90, 102, 93); doc.text('PRODUCTO', M, y); doc.text('CANT.', 135, y, { align: 'right' }); doc.text('PRECIO', 165, y, { align: 'right' }); doc.text('SUBTOTAL', W - M, y, { align: 'right' }); doc.line(M, y + 2, W - M, y + 2); y += 9; }
     th();
     p.items.forEach(function (i) {
@@ -686,11 +803,12 @@ document.addEventListener('click', function (e) {
   if (a === 'tab') { S.tab = v; S.q = ''; drawTab(); }
   else if (a === 'filt') { S.filtro = v; drawTab(); }
   else if (a === 'cat') { S.cat = v; drawTab(); }
-  else if (a === 'fab') { if (S.tab === 'merc') openProdForm(); else openPedidoForm(); }
+  else if (a === 'fab') { if (S.tab === 'merc') openProdForm(); else if (S.tab === 'clientes') openClienteForm(); else openPedidoForm(); }
   else if (a === 'bell') openAvisos();
   else if (a === 'close') closeSheet();
   else if (a === 'openped') openDetail(id);
   else if (a === 'avopen') { if (ped()) openDetail(id); else toast('Ese pedido ya no existe.'); }
+  else if (a === 'editcli') { var cc = S.clientes.find(function (x) { return x.id === id; }); if (cc) openClienteForm(cc); }
   else if (a === 'editprod') { var pr = S.prods.find(function (x) { return x.id === id; }); if (pr) openProdForm(pr); }
   else if (a === 'editped') { var pe = ped(); if (pe) openPedidoForm(pe); }
   else if (a === 'setestado') { var ps = ped(); if (ps) setEstado(ps, v); }

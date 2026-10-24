@@ -151,3 +151,19 @@ input[type=email],input[type=password]{width:100%;min-height:44px;padding:10px 1
 #toast{bottom:calc(136px + env(safe-area-inset-bottom,0px))}
 [hidden]{display:none!important}
 img{max-width:100%}
+
+/* clientes */
+.cli{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
+.cli .cini{width:44px;height:44px;aspect-ratio:auto;flex:none;border-radius:50%;font-size:20px}
+.cli-b{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.cli-b strong,.cli-b span,.cli-b small{overflow-wrap:anywhere}
+.cli-b small{color:var(--muted)}
+.cli-n{flex:none;display:flex;flex-direction:column;align-items:center;font-weight:700;color:var(--accent)}
+.cli-n small{font-weight:500;font-size:11px;color:var(--muted)}
+.cli-pick{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;margin-top:-6px}
+.cli-pick .muted{font-size:13px;flex:1 1 140px;min-width:0;overflow-wrap:anywhere}
+.cli-det{display:flex;flex-direction:column;gap:8px}
+.cli-det small{display:block;color:var(--muted);font-size:12px}
+.cli-det a,.acts a.btn{color:var(--accent)}
+.acts a.btn{display:flex;align-items:center;justify-content:center;text-decoration:none}
+nav button{font-size:11.5px}
