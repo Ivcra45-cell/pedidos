@@ -373,7 +373,7 @@ function vAjustes() {
     '<p class="muted" style="margin:0;font-size:13px">Solo los emails de esta lista pueden entrar. La persona crea su cuenta con ese mismo email.</p></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ticket</h2><label class="field">Ancho del papel de la impresora<select id="tkw"><option value="80"' + (ls('tkw') === '58' ? '' : ' selected') + '>80 mm (el más común)</option><option value="58"' + (ls('tkw') === '58' ? ' selected' : '') + '>58 mm (angosto)</option></select></label></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">En este teléfono</h2>' + inst + '</div>' +
-    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
+    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><p class="muted" style="margin:0;font-size:12px">Versión de la app: 25/10 · tickets</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
 }
 
 /* ---------- hojas (pantallas completas) ---------- */
@@ -404,7 +404,6 @@ function detailHTML(p, rec) {
     (p.nota ? '<div class="box"><b>Nota</b><div style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(p.nota) + '</div></div>' : '') +
     (p.ticket ? '<div><h3 class="sec">Factura o ticket</h3><button class="ghost" style="padding:0;display:block" data-act="zoom" data-id="' + esc(p.ticket) + '" aria-label="Ver factura en grande"><img class="photo" alt="Factura o ticket del pedido" data-sp="' + esc(p.ticket) + '"></button></div>' : '') +
     '<div class="acts"><button class="btn primary" data-act="printped" data-id="' + esc(p.id) + '">Imprimir</button><button class="btn" data-act="pdfped" data-id="' + esc(p.id) + '">Descargar PDF</button>' +
-    '<button class="btn" style="grid-column:1/-1" data-act="tkped" data-id="' + esc(p.id) + '">Ticket (formato supermercado)</button>' +
     '<button class="btn" data-act="editped" data-id="' + esc(p.id) + '">Editar</button><button class="btn danger' + (rec.confirm ? ' arm' : '') + '" data-act="delped" data-id="' + esc(p.id) + '">' + (rec.confirm ? 'Tocá otra vez para eliminar' : 'Eliminar') + '</button></div>' +
     '<div><h3 class="sec">Historial de cambios</h3><ul class="hist">' + hist + '</ul></div>';
 }
@@ -799,7 +798,7 @@ function tkWrap(txt, n) {
   if (cur) out.push(cur);
   return out;
 }
-async function pdfTicket(p) {
+async function pdfTicket(p, imprimir) {
   var J = window.jspdf && window.jspdf.jsPDF; if (!J) { toast('No se pudo cargar el generador de PDF. Revisá la conexión.'); return; }
   try {
     var W = ls('tkw') === '58' ? 58 : 80, M = W === 58 ? 3 : 4, fs = W === 58 ? 8 : 9;
@@ -837,9 +836,21 @@ async function pdfTicket(p) {
       y += lh * (r.big ? 1.3 : 1);
     });
     var nombre = 'ticket-' + pad(p.numero) + '-' + (slug(p.cliente) || 'cliente') + '.pdf';
-    var w = window.open(doc.output('bloburl'), '_blank');
-    if (!w) { doc.save(nombre); toast('Se descargó el ticket. Abrilo para imprimirlo.', 5000); }
+    if (imprimir) {
+      var w = window.open(doc.output('bloburl'), '_blank');
+      if (!w) { doc.save(nombre); toast('Se descargó el ticket. Abrilo para imprimirlo.', 5000); }
+    } else doc.save(nombre);
   } catch (e) { toast('No se pudo generar el ticket.'); }
+}
+
+function openFormato(p, imprimir) {
+  var im = imprimir ? '1' : '0', ancho = ls('tkw') === '58' ? 58 : 80;
+  openSheet(imprimir ? 'Imprimir pedido' : 'Descargar pedido', function (rec) {
+    rec.body.innerHTML = '<p class="muted" style="margin:0">¿En qué formato?</p>' +
+      '<button class="btn primary fmt" data-act="fmt" data-v="tk" data-im="' + im + '" data-id="' + esc(p.id) + '"><b>Ticket</b><small>Como los de supermercado, para impresora de rollo de ' + ancho + ' mm</small></button>' +
+      '<button class="btn fmt" data-act="fmt" data-v="a4" data-im="' + im + '" data-id="' + esc(p.id) + '"><b>Hoja A4</b><small>Pedido completo con la foto de la factura</small></button>' +
+      '<p class="muted" style="margin:0;font-size:13px">El ancho del rollo se cambia en Ajustes.</p>';
+  }, 'Cancelar');
 }
 
 /* ---------- acciones ---------- */
@@ -867,9 +878,9 @@ document.addEventListener('click', function (e) {
   else if (a === 'editprod') { var pr = S.prods.find(function (x) { return x.id === id; }); if (pr) openProdForm(pr); }
   else if (a === 'editped') { var pe = ped(); if (pe) openPedidoForm(pe); }
   else if (a === 'setestado') { var ps = ped(); if (ps) setEstado(ps, v); }
-  else if (a === 'pdfped') { var pp = ped(); if (pp) pdfPedido(pp, false); }
-  else if (a === 'tkped') { var pt = ped(); if (pt) pdfTicket(pt); }
-  else if (a === 'printped') { var pq = ped(); if (pq) pdfPedido(pq, true); }
+  else if (a === 'pdfped') { var pp = ped(); if (pp) openFormato(pp, false); }
+  else if (a === 'fmt') { var pf = ped(); if (pf) { closeSheet(); if (v === 'tk') pdfTicket(pf, b.dataset.im === '1'); else pdfPedido(pf, b.dataset.im === '1'); } }
+  else if (a === 'printped') { var pq = ped(); if (pq) openFormato(pq, true); }
   else if (a === 'zoom') openSheet('Factura o ticket', function (r) { r.body.innerHTML = '<img class="zoom" alt="Factura o ticket" data-sp="' + esc(id) + '">'; });
   else if (a === 'delped') {
     var rec = stack[stack.length - 1], pd = ped(); if (!pd || !rec) return;
