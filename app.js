@@ -761,7 +761,7 @@ async function pdfPedido(p, imprimir) {
     var y = 58 + (cn.length - 1) * 7.5 + 9;
     var cl = p.clienteId && S.clientes.find(function (x) { return x.id === p.clienteId; });
     if (cl) {
-      var dl = [cl.nombre && cl.nombre !== p.cliente ? cl.nombre : '', cl.tel ? 'Tel.: ' + cl.tel : '', cl.doc ? 'C.I. / RUC: ' + cl.doc : '', cl.dir ? 'Dirección: ' + cl.dir : ''].filter(Boolean);
+      var dl = [cl.nombre && cl.nombre !== p.cliente ? cl.nombre : '', cl.tel ? 'Tel.: ' + cl.tel : '', cl.doc ? 'C.I. / RUC: ' + cl.doc : ''].filter(Boolean);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10 * K); gris();
       dl.forEach(function (t) { var ls2 = doc.splitTextToSize(t, W - 2 * M); doc.text(ls2, M, y); y += ls2.length * 5.8; });
       if (dl.length) y += 4;
@@ -821,7 +821,7 @@ async function pdfTicket(p, imprimir) {
     L.push({ t: 'CLIENTE' });
     tkWrap(p.cliente, cols).forEach(function (s) { L.push({ t: s, b: true }); });
     var cl = p.clienteId && S.clientes.find(function (x) { return x.id === p.clienteId; });
-    if (cl) [cl.nombre && cl.nombre !== p.cliente ? cl.nombre : '', cl.tel ? 'Tel: ' + cl.tel : '', cl.doc ? 'CI/RUC: ' + cl.doc : '', cl.dir ? cl.dir : ''].filter(Boolean).forEach(function (t) { tkWrap(t, cols).forEach(function (s) { L.push({ t: s }); }); });
+    if (cl) [cl.nombre && cl.nombre !== p.cliente ? cl.nombre : '', cl.tel ? 'Tel: ' + cl.tel : '', cl.doc ? 'CI/RUC: ' + cl.doc : ''].filter(Boolean).forEach(function (t) { tkWrap(t, cols).forEach(function (s) { L.push({ t: s }); }); });
     sep();
     p.items.forEach(function (i) {
       tkWrap(i.nombre, cols).forEach(function (s) { L.push({ t: s }); });
