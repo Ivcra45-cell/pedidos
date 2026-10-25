@@ -813,7 +813,7 @@ async function pdfTicket(p, imprimir) {
     var sep = function () { L.push({ t: new Array(cols + 1).join('-') }); };
     var ctr = function (t, b, big) { tkWrap(t, big ? Math.floor(cols * 0.8) : cols).forEach(function (s) { L.push({ t: s, c: true, b: b, big: big }); }); };
     var two = function (a, b2, bold, big) { var n = big ? Math.floor(cols * 0.8) : cols; if (a.length + b2.length + 1 > n) { L.push({ t: a, b: bold, big: big }); L.push({ t: new Array(Math.max(0, n - b2.length) + 1).join(' ') + b2, b: bold, big: big }); return; } L.push({ t: a + new Array(n - a.length - b2.length + 1).join(' ') + b2, b: bold, big: big }); };
-    ctr(S.cfg.nombre || 'Pedido', true, true);
+    tkWrap(S.cfg.nombre || 'Pedido', Math.floor(cols / 1.875)).forEach(function (t) { L.push({ t: t, c: true, b: true, s: 1.875 }); });
     L.push({ t: '' });
     ctr('PEDIDO Nº ' + pad(p.numero), true);
     ctr('Fecha: ' + fdia(p.fecha));
@@ -832,14 +832,14 @@ async function pdfTicket(p, imprimir) {
     sep();
     if (p.nota) { L.push({ t: 'NOTA' }); tkWrap(p.nota, cols).forEach(function (s) { L.push({ t: s }); }); sep(); }
     ctr('¡Gracias por su compra!');
-    var H = Math.max(60, M * 2 + L.reduce(function (s, r) { return s + lh * (r.big ? 1.3 : 1); }, 0) + 6);
+    var H = Math.max(60, M * 2 + L.reduce(function (s, r) { return s + lh * (r.s ? r.s * 1.05 : r.big ? 1.3 : 1); }, 0) + 6);
     var doc = new J({ unit: 'mm', format: [W, H] });
     doc.setTextColor(0, 0, 0);
     var y = M + 3;
     L.forEach(function (r) {
-      doc.setFont('courier', r.b ? 'bold' : 'normal'); doc.setFontSize(r.big ? fs * 1.25 : fs);
+      doc.setFont('courier', r.b ? 'bold' : 'normal'); doc.setFontSize(r.s ? fs * r.s : r.big ? fs * 1.25 : fs);
       if (r.t) { if (r.c) doc.text(r.t, W / 2, y, { align: 'center' }); else doc.text(r.t, M, y); }
-      y += lh * (r.big ? 1.3 : 1);
+      y += lh * (r.s ? r.s * 1.05 : r.big ? 1.3 : 1);
     });
     var nombre = 'ticket-' + pad(p.numero) + '-' + (slug(p.cliente) || 'cliente') + '.pdf';
     if (imprimir) {
