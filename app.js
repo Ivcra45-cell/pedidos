@@ -139,7 +139,7 @@ async function cargar() {
   if (bad) { S.err = bad.error.message || 'error'; throw bad.error; }
   S.err = null;
   S.prods = (r[0].data || []).map(function (p) {
-    return { id: p.id, nombre: p.nombre, categoria: p.categoria, precio: Number(p.precio) || 0, stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
+    return { id: p.id, nombre: p.nombre, categoria: p.categoria, precio: Number(p.precio) || 0, costo: p.precio_costo == null ? null : Number(p.precio_costo), stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
   });
   S.peds = (r[1].data || []).map(mapPedido);
   S.avisos = (r[2].data || []).map(function (a) {
@@ -625,6 +625,9 @@ function openProdForm(p) {
       '<label class="field">Nombre<input type="text" id="g-nom" autocomplete="off" value="' + esc(p ? p.nombre : '') + '"></label>' +
       '<label class="field">Categoría<input type="text" id="g-cat" list="dl-cat" autocomplete="off" placeholder="Ej.: Bebidas" value="' + esc(p ? p.categoria : '') + '"></label>' + dlist('dl-cat', cats()) +
       '<label class="field">Precio de venta (Gs.)<input type="number" id="g-pre" inputmode="numeric" min="0" step="1" placeholder="Ej.: 15000" value="' + esc(p ? p.precio : '') + '"></label>' +
+      '<label class="field">Precio de costo (Gs.) · lo que te cuesta comprarlo<input type="number" id="g-cos" inputmode="numeric" min="0" step="1" placeholder="Ej.: 11000" value="' + esc(p && p.costo != null ? p.costo : '') + '"></label>' +
+      '<p class="muted" id="g-gan" style="margin:-6px 0 0;font-size:13px"></p>' +
+      '<p class="muted" style="margin:0;font-size:12px">El costo es solo para vos: no sale en el catálogo, ni en facturas, ni en tickets.</p>' +
       '<label class="field">Cantidad en stock (vacío si no lo controlás)<input type="number" id="g-stk" inputmode="numeric" min="0" step="1" placeholder="Ej.: 24" value="' + esc(p && p.stock != null ? p.stock : '') + '"></label>' +
       '<div class="err" id="g-err" role="alert"></div>' +
       '<button class="btn primary" id="g-save" type="button">Guardar producto</button>' +
@@ -640,6 +643,13 @@ function openProdForm(p) {
     }
     rec.onClose = function () { if (f.preview) URL.revokeObjectURL(f.preview); };
     paint();
+    function ganancia() {
+      var pv = $g('#g-pre').value, co = $g('#g-cos').value, t = $g('#g-gan');
+      if (pv === '' || co === '') { t.textContent = ''; return; }
+      var g = Math.round(Number(pv)) - Math.round(Number(co)), pc = Number(co) > 0 ? Math.round(g / Number(co) * 100) : null;
+      t.textContent = 'Ganancia por unidad: ' + money(g) + (pc !== null ? ' (' + pc + ' % sobre el costo)' : '');
+    }
+    $g('#g-pre').addEventListener('input', ganancia); $g('#g-cos').addEventListener('input', ganancia); ganancia();
     $g('#g-save').addEventListener('click', async function () {
       var btn = $g('#g-save'), err = $g('#g-err'); err.textContent = '';
       var nombre = $g('#g-nom').value.trim();
@@ -649,8 +659,8 @@ function openProdForm(p) {
       try {
         var path = f.imagen || null;
         if (f.blob) path = await subirFoto('productos', f.blob);
-        var stk = $g('#g-stk').value;
-        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), imagen_path: path };
+        var stk = $g('#g-stk').value, cos = $g('#g-cos').value;
+        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), precio_costo: cos === '' ? null : Math.max(0, Math.round(Number(cos) || 0)), imagen_path: path };
         var r = p ? await sb.from('productos').update(row).eq('id', p.id) : await sb.from('productos').insert(row);
         if (r.error) throw r.error;
         toast('Producto guardado.'); closeSheet(); recargar();
@@ -813,7 +823,9 @@ async function pdfTicket(p, imprimir) {
     var sep = function () { L.push({ t: new Array(cols + 1).join('-') }); };
     var ctr = function (t, b, big) { tkWrap(t, big ? Math.floor(cols * 0.8) : cols).forEach(function (s) { L.push({ t: s, c: true, b: b, big: big }); }); };
     var two = function (a, b2, bold, big) { var n = big ? Math.floor(cols * 0.8) : cols; if (a.length + b2.length + 1 > n) { L.push({ t: a, b: bold, big: big }); L.push({ t: new Array(Math.max(0, n - b2.length) + 1).join(' ') + b2, b: bold, big: big }); return; } L.push({ t: a + new Array(n - a.length - b2.length + 1).join(' ') + b2, b: bold, big: big }); };
-    tkWrap(S.cfg.nombre || 'Pedido', Math.floor(cols / 1.875)).forEach(function (t) { L.push({ t: t, c: true, b: true, s: 1.875 }); });
+    var nn = (S.cfg.nombre || 'Pedido').trim(), ns = Math.min(1.875, cols / nn.length);
+    if (ns >= 1.25) L.push({ t: nn, c: true, b: true, s: ns });
+    else tkWrap(nn, Math.floor(cols / 1.25)).forEach(function (t) { L.push({ t: t, c: true, b: true, s: 1.25 }); });
     L.push({ t: '' });
     ctr('PEDIDO Nº ' + pad(p.numero), true);
     ctr('Fecha: ' + fdia(p.fecha));
