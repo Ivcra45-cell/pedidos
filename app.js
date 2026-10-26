@@ -21,8 +21,8 @@ if (!window.supabase || !CFG.url || !CFG.key) {
 }
 var sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
-var me = { id: null, email: '', nombre: '' };
-var S = { prods: [], clientes: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
+var me = { id: null, email: '', nombre: '', rol: 'vendedor' };
+var S = { costos: {}, prods: [], clientes: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
 var stack = [];
 var deferredInstall = null;
 var loadT = Date.now();
@@ -49,9 +49,13 @@ function cliLinea(c) { return [c.tel, c.doc, c.dir].filter(Boolean).join(' · ')
 function telHref(t) { return 'tel:' + String(t || '').replace(/[^\d+]/g, ''); }
 function mapHref(d) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(d); }
 function faltasTxt(l) { return l && l.length ? ' Stock insuficiente: ' + l.map(function (x) { return x.nombre + ' (faltan ' + x.faltan + ')'; }).join(', ') + '.' : ''; }
+var ROLES = { admin: 'Administrador', encargado: 'Encargado', vendedor: 'Vendedor' };
+var ROLDESC = { admin: 'Todo, incluido este panel de cuentas.', encargado: 'Todo menos administrar cuentas: mercadería, costos y eliminar pedidos.', vendedor: 'Carga y edita pedidos y clientes. No ve costos ni edita mercadería.' };
+function esAdmin() { return me.rol === 'admin'; }
+function esGestor() { return me.rol === 'admin' || me.rol === 'encargado'; }
 function errMsg(e, def) {
   var m = (e && (e.message || e.error_description)) || '';
-  if (/Falta |ya no existe|no autorizado/.test(m)) return m;
+  if (/Falta |ya no existe|no autorizado/i.test(m)) return m;
   return def;
 }
 function show(id) {
@@ -133,13 +137,14 @@ async function cargar() {
     sb.from('avisos').select('*').order('creado_en', { ascending: false }).limit(60),
     sb.from('negocio').select('*').eq('id', 1).maybeSingle(),
     sb.from('miembros').select('*').order('creado_en'),
-    sb.from('clientes').select('*').order('nombre')
+    sb.from('clientes').select('*').order('nombre'),
+    sb.from('producto_costos').select('*')
   ]);
-  var bad = r.find(function (x) { return x.error; });
+  var bad = r.slice(0, 6).find(function (x) { return x.error; });
   if (bad) { S.err = bad.error.message || 'error'; throw bad.error; }
   S.err = null;
   S.prods = (r[0].data || []).map(function (p) {
-    return { id: p.id, nombre: p.nombre, categoria: p.categoria, precio: Number(p.precio) || 0, costo: p.precio_costo == null ? null : Number(p.precio_costo), stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
+    return { id: p.id, nombre: p.nombre, categoria: p.categoria, precio: Number(p.precio) || 0, costo: null, stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
   });
   S.peds = (r[1].data || []).map(mapPedido);
   S.avisos = (r[2].data || []).map(function (a) {
@@ -147,6 +152,14 @@ async function cargar() {
   });
   S.cfg = r[3].data || { nombre: '' };
   S.miembros = r[4].data || [];
+  var yo2 = S.miembros.find(function (m) { return (m.email || '').toLowerCase() === me.email; });
+  if (yo2) {
+    me.rol = yo2.rol || 'vendedor';
+    if (yo2.activo === false) { mostrarDenegado(true); throw new Error('bloqueada'); }
+  }
+  S.costos = {};
+  ((r[6] && !r[6].error && r[6].data) || []).forEach(function (c) { S.costos[c.producto_id] = Number(c.costo); });
+  S.prods.forEach(function (p) { p.costo = S.costos[p.id] == null ? null : S.costos[p.id]; });
   S.clientes = (r[5].data || []).map(function (c) {
     return { id: c.id, nombre: c.nombre || '', fantasia: c.nombre_fantasia || '', tel: c.telefono || '', doc: c.documento || '', dir: c.direccion || '' };
   });
@@ -197,6 +210,7 @@ function authMsg(t, ok) { var m = $('#a-msg'); m.textContent = t; m.className = 
 function traducir(e) {
   var m = (e && e.message) || '';
   if (/Invalid login credentials/i.test(m)) return 'Email o contraseña incorrectos.';
+  if (/banned/i.test(m)) return 'Esta cuenta está bloqueada. Hablá con el administrador.';
   if (/not confirmed/i.test(m)) return 'Todavía falta confirmar tu email. Abrí el enlace que te llegó al correo (revisá también spam).';
   if (/already registered/i.test(m)) return 'Ese email ya tiene cuenta. Tocá «Ya tengo cuenta» y entrá con tu contraseña.';
   if (/rate limit|too many/i.test(m)) return 'Se enviaron demasiados mensajes. Esperá unos minutos y probá de nuevo.';
@@ -234,14 +248,22 @@ async function onForgot() {
   var r = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
   if (r.error) authMsg(traducir(r.error)); else authMsg('Si ese email tiene cuenta, te mandamos un enlace para elegir una contraseña nueva.', true);
 }
+function mostrarDenegado(bloqueada) {
+  $('#denied-msg').innerHTML = bloqueada
+    ? 'La cuenta <b>' + esc(me.email) + '</b> está bloqueada. Hablá con el administrador.'
+    : 'La cuenta <b>' + esc(me.email) + '</b> todavía no está autorizada para usar esta app. Pedile al administrador que te agregue, o entrá con otro email.';
+  show('denied');
+}
 async function entrar(session) {
   if (!session) { show('login'); return; }
   me.id = session.user.id; me.email = (session.user.email || '').toLowerCase();
   var r = await sb.from('miembros').select('*');
   if (r.error) { authMsg('No se pudo comprobar tu acceso. Revisá la conexión.'); show('login'); return; }
   var yo = (r.data || []).find(function (m) { return (m.email || '').toLowerCase() === me.email; });
-  if (!yo) { $('#denied-mail').textContent = me.email; show('denied'); return; }
+  if (!yo) { mostrarDenegado(false); return; }
+  if (yo.activo === false) { mostrarDenegado(true); return; }
   me.nombre = yo.nombre || me.email.split('@')[0];
+  me.rol = yo.rol || 'vendedor';
   S.miembros = r.data;
   show('app');
   drawTop(); drawTab();
@@ -271,7 +293,7 @@ function drawTab() {
   } else if (S.tab === 'merc') {
     tb.innerHTML = '<input type="search" id="q" placeholder="Buscar producto" value="' + esc(S.q) + '" aria-label="Buscar productos">' +
       '<div class="chips">' + ['todas'].concat(cats()).map(function (c) { return '<button class="chip' + (S.cat === c ? ' on' : '') + '" data-act="cat" data-v="' + esc(c) + '">' + (c === 'todas' ? 'Todas' : esc(c)) + '</button>'; }).join('') + '</div>';
-    fab.innerHTML = IC_PLUS + 'Nuevo producto'; fab.hidden = false;
+    fab.innerHTML = IC_PLUS + 'Nuevo producto'; fab.hidden = !esGestor();
   } else {
     tb.innerHTML = ''; fab.hidden = true;
   }
@@ -335,7 +357,7 @@ function vMerc() {
   var q = S.q.trim().toLowerCase();
   var l = S.prods.filter(function (p) { return (S.cat === 'todas' || (p.categoria || 'Sin categoría') === S.cat) && (!q || (p.nombre || '').toLowerCase().indexOf(q) >= 0); });
   if (!l.length) return S.prods.length ? '<div class="empty">No hay productos que coincidan.</div>' :
-    '<div class="empty"><span>Todavía no hay mercadería cargada. Cada producto lleva foto, categoría, precio de venta y cantidad en stock.</span><button class="btn primary" data-act="fab">Cargar el primer producto</button></div>';
+    '<div class="empty"><span>Todavía no hay mercadería cargada. Cada producto lleva foto, categoría, precio de venta y cantidad en stock.</span>' + (esGestor() ? '<button class="btn primary" data-act="fab">Cargar el primer producto</button>' : '') + '</div>';
   var g = {}; l.forEach(function (p) { var c = p.categoria || 'Sin categoría'; (g[c] = g[c] || []).push(p); });
   return Object.keys(g).sort(function (a, b) { return a.localeCompare(b, 'es'); }).map(function (c) {
     return '<h2 class="cat-h">' + esc(c) + '</h2><div class="grid">' + g[c].sort(function (a, b) { return (a.nombre || '').localeCompare(b.nombre || '', 'es'); }).map(function (p) {
@@ -362,18 +384,12 @@ function vAjustes() {
   var inst = deferredInstall ? '<button class="btn" data-act="instalar">Instalar la app en el teléfono</button>' :
     '<p class="muted" style="margin:0">Para instalarla: en Chrome tocá el menú ⋮ y elegí «Instalar app» o «Agregar a la pantalla principal».</p>';
   return '<div class="ajuste-sec"><h2 class="sec">Negocio</h2>' +
-    '<label class="field">Nombre del negocio (sale en el catálogo y en los PDF)<input type="text" id="biz" placeholder="Ej.: Dulce Capricho"></label></div>' +
-    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Equipo</h2><div class="box"><ul class="items">' + S.miembros.map(function (m) {
-      var yo = (m.email || '').toLowerCase() === me.email;
-      var conf = S.delM === m.email;
-      return '<li><span>' + esc(m.nombre || m.email) + (yo ? ' (vos)' : '') + '<small>' + esc(m.email) + '</small></span>' +
-        (yo ? '' : '<button class="' + (conf ? 'btn danger arm' : 'rm') + '" data-act="delmiembro" data-v="' + esc(m.email) + '" aria-label="Quitar a ' + esc(m.email) + '">' + (conf ? 'Tocá otra vez' : '✕') + '</button>') + '</li>';
-    }).join('') + '</ul></div>' +
-    '<div class="addm"><input type="email" id="m-mail" placeholder="Email de la persona a autorizar" inputmode="email" aria-label="Email a autorizar"><input type="text" id="m-nom" placeholder="Nombre (Ej.: Mamá)" aria-label="Nombre"><button class="btn" data-act="addmiembro">Autorizar</button></div>' +
-    '<p class="muted" style="margin:0;font-size:13px">Solo los emails de esta lista pueden entrar. La persona crea su cuenta con ese mismo email.</p></div>' +
+    (esGestor() ? '<label class="field">Nombre del negocio (sale en el catálogo y en los PDF)<input type="text" id="biz" placeholder="Ej.: Dulce Capricho"></label>' :
+      '<p class="muted" style="margin:0">Nombre del negocio: <b>' + esc(S.cfg.nombre || 'sin nombre') + '</b></p>') + '</div>' +
+    (esAdmin() ? '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Administración</h2><p class="muted" style="margin:0;font-size:13px">Cuentas de la app: agregar personas, asignar roles, bloquear y cambiar contraseñas. Solo lo ves vos.</p><button class="btn primary" data-act="admin">Administrar cuentas</button></div>' : '') +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ticket</h2><label class="field">Ancho del papel de la impresora<select id="tkw"><option value="80"' + (ls('tkw') === '58' ? '' : ' selected') + '>80 mm (el más común)</option><option value="58"' + (ls('tkw') === '58' ? ' selected' : '') + '>58 mm (angosto)</option></select></label></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">En este teléfono</h2>' + inst + '</div>' +
-    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><p class="muted" style="margin:0;font-size:12px">Versión de la app: 25/10 · tickets</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
+    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><p class="muted" style="margin:0">Tu rol: <b>' + esc(ROLES[me.rol] || me.rol) + '</b></p><p class="muted" style="margin:0;font-size:12px">Versión de la app: 26/10 · administración</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
 }
 
 /* ---------- hojas (pantallas completas) ---------- */
@@ -404,7 +420,7 @@ function detailHTML(p, rec) {
     (p.nota ? '<div class="box"><b>Nota</b><div style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(p.nota) + '</div></div>' : '') +
     (p.ticket ? '<div><h3 class="sec">Factura o ticket</h3><button class="ghost" style="padding:0;display:block" data-act="zoom" data-id="' + esc(p.ticket) + '" aria-label="Ver factura en grande"><img class="photo" alt="Factura o ticket del pedido" data-sp="' + esc(p.ticket) + '"></button></div>' : '') +
     '<div class="acts"><button class="btn primary" data-act="printped" data-id="' + esc(p.id) + '">Imprimir</button><button class="btn" data-act="pdfped" data-id="' + esc(p.id) + '">Descargar PDF</button>' +
-    '<button class="btn" data-act="editped" data-id="' + esc(p.id) + '">Editar</button><button class="btn danger' + (rec.confirm ? ' arm' : '') + '" data-act="delped" data-id="' + esc(p.id) + '">' + (rec.confirm ? 'Tocá otra vez para eliminar' : 'Eliminar') + '</button></div>' +
+    '<button class="btn" data-act="editped" data-id="' + esc(p.id) + '">Editar</button>' + (esGestor() ? '<button class="btn danger' + (rec.confirm ? ' arm' : '') + '" data-act="delped" data-id="' + esc(p.id) + '">' + (rec.confirm ? 'Tocá otra vez para eliminar' : 'Eliminar') + '</button>' : '') + '</div>' +
     '<div><h3 class="sec">Historial de cambios</h3><ul class="hist">' + hist + '</ul></div>';
 }
 function openDetail(id) {
@@ -572,6 +588,109 @@ function openPedidoForm(p) {
   }, 'Cancelar');
 }
 
+/* ---------- panel de administración (solo administrador) ---------- */
+async function api(accion, datos) {
+  var r = await sb.functions.invoke('admin', { body: Object.assign({ accion: accion }, datos || {}) });
+  if (r.error) {
+    var msg = 'No se pudo completar. Revisá la conexión y probá de nuevo.';
+    try { var j = await r.error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  if (r.data && r.data.error) throw new Error(r.data.error);
+  return r.data;
+}
+function rolOpts(sel) { return Object.keys(ROLES).map(function (k) { return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + ROLES[k] + '</option>'; }).join(''); }
+function openAdmin() {
+  var rec = openSheet('Administrar cuentas', function () {}, 'Ajustes');
+  rec.load = async function () {
+    rec.body.innerHTML = '<p class="muted">Cargando…</p>';
+    var d;
+    try { d = await api('listar'); }
+    catch (e) { rec.body.innerHTML = '<div class="empty"><span>' + esc(e.message) + '</span><button class="btn" id="ad-retry">Reintentar</button></div>'; rec.body.querySelector('#ad-retry').addEventListener('click', rec.load); return; }
+    var l = d.personas || [];
+    rec.body.innerHTML = '<button class="btn primary" id="ad-add">+ Agregar persona</button>' +
+      '<div class="list">' + l.map(function (m, i) {
+        var est = !m.activo ? '<span class="chip2 bad">Bloqueada</span>' : (!m.cuenta ? '<span class="chip2">Sin cuenta todavía</span>' : '<span class="chip2 ok">Activa</span>');
+        return '<button class="cli" data-i="' + i + '"><span class="ph cini">' + esc((m.nombre || m.email).trim().charAt(0).toUpperCase()) + '</span>' +
+          '<span class="cli-b"><strong>' + esc(m.nombre || m.email) + (m.yo ? ' (vos)' : '') + '</strong><small>' + esc(m.email) + '</small>' +
+          '<span class="chips2"><span class="chip2' + (m.rol === 'admin' ? ' adm' : '') + '">' + esc(ROLES[m.rol] || m.rol) + '</span>' + est + '</span>' +
+          (m.ultimo_ingreso ? '<small>Último ingreso: ' + ftime(Date.parse(m.ultimo_ingreso)) + '</small>' : '') + '</span></button>';
+      }).join('') + '</div>' +
+      '<div class="box"><b>Qué puede hacer cada rol</b><ul class="roles">' + Object.keys(ROLES).map(function (k) { return '<li><b>' + ROLES[k] + ':</b> ' + esc(ROLDESC[k]) + '</li>'; }).join('') + '</ul></div>';
+    rec.body.querySelector('#ad-add').addEventListener('click', function () { openAgregar(rec.load); });
+    rec.body.querySelectorAll('.cli[data-i]').forEach(function (b) { b.addEventListener('click', function () { openPersona(l[Number(b.dataset.i)], rec.load); }); });
+  };
+  rec.load();
+}
+function openAgregar(onDone) {
+  openSheet('Agregar persona', function (rec) {
+    rec.body.innerHTML =
+      '<label class="field">Email<input type="email" id="n-mail" inputmode="email" autocomplete="off" placeholder="persona@gmail.com"></label>' +
+      '<label class="field">Nombre<input type="text" id="n-nom" autocomplete="off" placeholder="Ej.: Papá"></label>' +
+      '<label class="field">Rol<select id="n-rol">' + rolOpts('vendedor') + '</select></label>' +
+      '<p class="muted" id="n-rd" style="margin:-6px 0 0;font-size:13px"></p>' +
+      '<label class="field">Contraseña inicial (opcional, mínimo 8 caracteres)<input type="text" id="n-pass" autocomplete="off" placeholder="Si la dejás vacía, la persona crea su cuenta"></label>' +
+      '<p class="muted" style="margin:-6px 0 0;font-size:13px">Con contraseña, la cuenta queda lista para entrar ya mismo y se la pasás a la persona. Sin contraseña, tiene que tocar «Primera vez: crear mi cuenta» con este mismo email.</p>' +
+      '<div class="err" id="n-err" role="alert"></div><button class="btn primary" id="n-go" type="button">Agregar</button>';
+    var $n = function (s) { return rec.body.querySelector(s); };
+    function rd() { $n('#n-rd').textContent = ROLDESC[$n('#n-rol').value]; }
+    $n('#n-rol').addEventListener('change', rd); rd();
+    $n('#n-go').addEventListener('click', async function () {
+      var btn = $n('#n-go'), err = $n('#n-err'); err.textContent = ''; btn.disabled = true; btn.textContent = 'Agregando…';
+      try {
+        await api('crear', { email: $n('#n-mail').value.trim(), nombre: $n('#n-nom').value.trim(), rol: $n('#n-rol').value, password: $n('#n-pass').value });
+        toast('Persona agregada.'); closeSheet(); onDone();
+      } catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Agregar'; }
+    });
+  }, 'Cancelar');
+}
+function openPersona(m, onDone) {
+  openSheet(m.nombre || m.email, function (rec) {
+    var conf = { b: false, d: false };
+    rec.body.innerHTML =
+      '<p class="muted" style="margin:0">' + esc(m.email) + (m.yo ? ' · es tu cuenta' : '') + '</p>' +
+      '<label class="field">Nombre<input type="text" id="p-nom" autocomplete="off" value="' + esc(m.nombre || '') + '"></label>' +
+      '<label class="field">Rol<select id="p-rol"' + (m.yo ? ' disabled' : '') + '>' + rolOpts(m.rol) + '</select></label>' +
+      '<p class="muted" id="p-rd" style="margin:-6px 0 0;font-size:13px"></p>' +
+      '<div class="err" id="p-err" role="alert"></div>' +
+      '<button class="btn primary" id="p-save" type="button">Guardar nombre y rol</button>' +
+      '<div class="ajuste-sec" style="margin-top:10px"><h3 class="sec">Contraseña</h3>' +
+      '<label class="field">' + (m.cuenta ? 'Nueva contraseña (mínimo 8 caracteres)' : 'Esta persona todavía no tiene cuenta. Poné una contraseña para crearla ahora (mínimo 8)') + '<input type="text" id="p-pass" autocomplete="off"></label>' +
+      '<button class="btn" id="p-pw" type="button">' + (m.cuenta ? 'Cambiar contraseña' : 'Crear cuenta con esta contraseña') + '</button>' +
+      '<p class="muted" style="margin:0;font-size:12px">Si la cambiás, se la tenés que pasar vos a la persona. Todavía puede seguir con la sesión abierta hasta que se venza.</p></div>' +
+      (m.yo ? '' : '<div class="ajuste-sec" style="margin-top:10px"><h3 class="sec">Acceso</h3>' +
+        '<button class="btn ' + (m.activo ? 'danger' : 'primary') + '" id="p-blk" type="button">' + (m.activo ? 'Bloquear cuenta' : 'Desbloquear cuenta') + '</button>' +
+        '<p class="muted" style="margin:0;font-size:12px">' + (m.activo ? 'Al bloquearla deja de ver los datos y no puede volver a entrar ni recibe avisos.' : 'La cuenta está bloqueada. Al desbloquearla puede volver a entrar.') + '</p>' +
+        '<button class="btn danger" id="p-del" type="button">Eliminar persona y su cuenta</button></div>');
+    var $p = function (s) { return rec.body.querySelector(s); };
+    function rd() { $p('#p-rd').textContent = ROLDESC[$p('#p-rol').value]; }
+    $p('#p-rol').addEventListener('change', rd); rd();
+    async function run(btn, fn, ok, back) {
+      var err = $p('#p-err'); err.textContent = ''; btn.disabled = true;
+      try { await fn(); toast(ok); if (back) { closeSheet(); } onDone(); } catch (e) { err.textContent = e.message; }
+      btn.disabled = false;
+    }
+    $p('#p-save').addEventListener('click', function () { run(this, function () { return api('editar', { email: m.email, nombre: $p('#p-nom').value.trim(), rol: $p('#p-rol').value }); }, 'Guardado.', true); });
+    $p('#p-pw').addEventListener('click', function () {
+      var pw = $p('#p-pass').value, self = this;
+      if (pw.length < 8) { $p('#p-err').textContent = 'La contraseña tiene que tener al menos 8 caracteres.'; return; }
+      run(self, function () { return api('password', { email: m.email, password: pw }); }, m.cuenta ? 'Contraseña cambiada. Pasásela a la persona.' : 'Cuenta creada. Pasale la contraseña a la persona.', true);
+    });
+    var blk = $p('#p-blk');
+    if (blk) blk.addEventListener('click', function () {
+      var self = this;
+      if (m.activo && !conf.b) { conf.b = true; self.textContent = 'Tocá otra vez para bloquear'; self.classList.add('arm'); setTimeout(function () { if (self.isConnected) { conf.b = false; self.textContent = 'Bloquear cuenta'; self.classList.remove('arm'); } }, 4000); return; }
+      run(self, function () { return api('bloquear', { email: m.email, bloqueado: m.activo }); }, m.activo ? 'Cuenta bloqueada.' : 'Cuenta desbloqueada.', true);
+    });
+    var del = $p('#p-del');
+    if (del) del.addEventListener('click', function () {
+      var self = this;
+      if (!conf.d) { conf.d = true; self.textContent = 'Tocá otra vez para eliminar'; self.classList.add('arm'); setTimeout(function () { if (self.isConnected) { conf.d = false; self.textContent = 'Eliminar persona y su cuenta'; self.classList.remove('arm'); } }, 4000); return; }
+      run(self, function () { return api('eliminar', { email: m.email }); }, 'Persona eliminada.', true);
+    });
+  }, 'Volver');
+}
+
 /* ---------- formulario de cliente ---------- */
 function openClienteForm(c, onSaved, nombreIni) {
   var f = { confirm: false };
@@ -625,9 +744,9 @@ function openProdForm(p) {
       '<label class="field">Nombre<input type="text" id="g-nom" autocomplete="off" value="' + esc(p ? p.nombre : '') + '"></label>' +
       '<label class="field">Categoría<input type="text" id="g-cat" list="dl-cat" autocomplete="off" placeholder="Ej.: Bebidas" value="' + esc(p ? p.categoria : '') + '"></label>' + dlist('dl-cat', cats()) +
       '<label class="field">Precio de venta (Gs.)<input type="number" id="g-pre" inputmode="numeric" min="0" step="1" placeholder="Ej.: 15000" value="' + esc(p ? p.precio : '') + '"></label>' +
-      '<label class="field">Precio de costo (Gs.) · lo que te cuesta comprarlo<input type="number" id="g-cos" inputmode="numeric" min="0" step="1" placeholder="Ej.: 11000" value="' + esc(p && p.costo != null ? p.costo : '') + '"></label>' +
+      (esGestor() ? '<label class="field">Precio de costo (Gs.) · lo que te cuesta comprarlo<input type="number" id="g-cos" inputmode="numeric" min="0" step="1" placeholder="Ej.: 11000" value="' + esc(p && p.costo != null ? p.costo : '') + '"></label>' +
       '<p class="muted" id="g-gan" style="margin:-6px 0 0;font-size:13px"></p>' +
-      '<p class="muted" style="margin:0;font-size:12px">El costo es solo para vos: no sale en el catálogo, ni en facturas, ni en tickets.</p>' +
+      '<p class="muted" style="margin:0;font-size:12px">El costo lo ven solo el administrador y el encargado. No sale en el catálogo, ni en facturas, ni en tickets.</p>' : '') +
       '<label class="field">Cantidad en stock (vacío si no lo controlás)<input type="number" id="g-stk" inputmode="numeric" min="0" step="1" placeholder="Ej.: 24" value="' + esc(p && p.stock != null ? p.stock : '') + '"></label>' +
       '<div class="err" id="g-err" role="alert"></div>' +
       '<button class="btn primary" id="g-save" type="button">Guardar producto</button>' +
@@ -649,7 +768,7 @@ function openProdForm(p) {
       var g = Math.round(Number(pv)) - Math.round(Number(co)), pc = Number(co) > 0 ? Math.round(g / Number(co) * 100) : null;
       t.textContent = 'Ganancia por unidad: ' + money(g) + (pc !== null ? ' (' + pc + ' % sobre el costo)' : '');
     }
-    $g('#g-pre').addEventListener('input', ganancia); $g('#g-cos').addEventListener('input', ganancia); ganancia();
+    if ($g('#g-cos')) { $g('#g-pre').addEventListener('input', ganancia); $g('#g-cos').addEventListener('input', ganancia); ganancia(); }
     $g('#g-save').addEventListener('click', async function () {
       var btn = $g('#g-save'), err = $g('#g-err'); err.textContent = '';
       var nombre = $g('#g-nom').value.trim();
@@ -659,14 +778,20 @@ function openProdForm(p) {
       try {
         var path = f.imagen || null;
         if (f.blob) path = await subirFoto('productos', f.blob);
-        var stk = $g('#g-stk').value, cos = $g('#g-cos').value;
-        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), precio_costo: cos === '' ? null : Math.max(0, Math.round(Number(cos) || 0)), imagen_path: path };
-        var r = p ? await sb.from('productos').update(row).eq('id', p.id) : await sb.from('productos').insert(row);
+        var stk = $g('#g-stk').value, cos = $g('#g-cos') ? $g('#g-cos').value : null;
+        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), imagen_path: path };
+        var r = p ? await sb.from('productos').update(row).eq('id', p.id) : await sb.from('productos').insert(row).select('id').single();
         if (r.error) throw r.error;
+        var pidNuevo = p ? p.id : (r.data && r.data.id);
+        if (cos !== null && pidNuevo) {
+          var rc = cos === '' ? await sb.from('producto_costos').delete().eq('producto_id', pidNuevo)
+            : await sb.from('producto_costos').upsert({ producto_id: pidNuevo, costo: Math.max(0, Math.round(Number(cos) || 0)) });
+          if (rc.error) throw rc.error;
+        }
         toast('Producto guardado.'); closeSheet(); recargar();
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Guardar producto';
-        err.textContent = 'No se pudo guardar. Revisá la conexión y probá de nuevo.';
+        err.textContent = errMsg(e, 'No se pudo guardar. Revisá la conexión y probá de nuevo.');
       }
     });
     var d = $g('#g-del');
@@ -887,13 +1012,13 @@ document.addEventListener('click', function (e) {
   if (a === 'tab') { S.tab = v; S.q = ''; drawTab(); }
   else if (a === 'filt') { S.filtro = v; drawTab(); }
   else if (a === 'cat') { S.cat = v; drawTab(); }
-  else if (a === 'fab') { if (S.tab === 'merc') openProdForm(); else if (S.tab === 'clientes') openClienteForm(); else openPedidoForm(); }
+  else if (a === 'fab') { if (S.tab === 'merc') { if (esGestor()) openProdForm(); } else if (S.tab === 'clientes') openClienteForm(); else openPedidoForm(); }
   else if (a === 'bell') openAvisos();
   else if (a === 'close') closeSheet();
   else if (a === 'openped') openDetail(id);
   else if (a === 'avopen') { if (ped()) openDetail(id); else toast('Ese pedido ya no existe.'); }
   else if (a === 'editcli') { var cc = S.clientes.find(function (x) { return x.id === id; }); if (cc) openClienteForm(cc); }
-  else if (a === 'editprod') { var pr = S.prods.find(function (x) { return x.id === id; }); if (pr) openProdForm(pr); }
+  else if (a === 'editprod') { var pr = S.prods.find(function (x) { return x.id === id; }); if (pr) { if (esGestor()) openProdForm(pr); else toast('Solo un encargado o administrador puede editar la mercadería.'); } }
   else if (a === 'editped') { var pe = ped(); if (pe) openPedidoForm(pe); }
   else if (a === 'setestado') { var ps = ped(); if (ps) setEstado(ps, v); }
   else if (a === 'pdfped') { var pp = ped(); if (pp) openFormato(pp, false); }
@@ -913,28 +1038,13 @@ document.addEventListener('click', function (e) {
   else if (a === 'gencat') pdfCatalogo();
   else if (a === 'logout') salir();
   else if (a === 'instalar') { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; drawList(); } }
-  else if (a === 'addmiembro') {
-    var mail = ($('#m-mail').value || '').trim().toLowerCase(), nom = ($('#m-nom').value || '').trim();
-    if (!/^\S+@\S+\.\S+$/.test(mail)) { toast('Escribí un email válido.'); return; }
-    sb.from('miembros').insert({ email: mail, nombre: nom || null }).then(function (r) {
-      if (r.error) { toast(/duplicate|already/i.test(r.error.message || '') ? 'Ese email ya está autorizado.' : 'No se pudo autorizar.'); return; }
-      toast('Autorizado. Que cree su cuenta con ese email.'); cargar().then(function () { drawList(); });
-    });
-  }
-  else if (a === 'delmiembro') {
-    if (S.delM !== v) { S.delM = v; drawList(); setTimeout(function () { if (S.delM === v) { S.delM = null; drawList(); } }, 4000); return; }
-    S.delM = null;
-    sb.from('miembros').delete().eq('email', v).then(function (r) {
-      if (r.error) { toast('No se pudo quitar.'); return; }
-      toast('Ya no tiene acceso.'); cargar().then(function () { drawList(); });
-    });
-  }
+  else if (a === 'admin') { if (esAdmin()) openAdmin(); }
 });
 document.addEventListener('input', function (e) { var t = e.target; if (t.id === 'q') { S.q = t.value; drawList(); } });
 document.addEventListener('change', function (e) {
   var t = e.target;
   if (t.id === 'tkw') { ls('tkw', t.value); toast('Listo. Los próximos tickets salen en ' + t.value + ' mm.'); }
-  if (t.id === 'biz') {
+  if (t.id === 'biz' && esGestor()) {
     var nombre = t.value.trim();
     sb.from('negocio').update({ nombre: nombre }).eq('id', 1).then(function (r) {
       if (r.error) { toast('No se pudo guardar el nombre.'); return; }
