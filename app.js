@@ -22,7 +22,7 @@ if (!window.supabase || !CFG.url || !CFG.key) {
 var sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 var me = { id: null, email: '', nombre: '', rol: 'vendedor' };
-var S = { costos: {}, prods: [], clientes: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
+var S = { costos: {}, prods: [], clientes: [], peds: [], avisos: [], miembros: [], cfg: { nombre: '' }, tab: 'pedidos', filtro: 'todos', q: '', cat: 'todas', prov: 'todos', catOff: {}, catPrecios: true, ok: false, err: null, delM: null };
 var stack = [];
 var deferredInstall = null;
 var loadT = Date.now();
@@ -35,6 +35,7 @@ function seen() { return Number(ls('visto') || 0); }
 function unread() { return S.avisos.filter(function (a) { return a.t > seen() && a.por !== me.id; }).length; }
 function who(por, nombre) { return por === me.id ? 'Vos' : (nombre || 'Familia'); }
 function cats() { var o = {}; S.prods.forEach(function (p) { o[p.categoria || 'Sin categoría'] = 1; }); return Object.keys(o).sort(function (a, b) { return a.localeCompare(b, 'es'); }); }
+function provs() { var o = {}; S.prods.forEach(function (p) { if (p.proveedor) o[p.proveedor] = 1; }); return Object.keys(o).sort(function (a, b) { return a.localeCompare(b, 'es'); }); }
 function dlist(id, arr) { return '<datalist id="' + id + '">' + arr.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>'; }
 /* clientes: se muestra el nombre fantasía (el local); si no tiene, el nombre */
 function cliNom(c) { return c.fantasia || c.nombre; }
@@ -144,7 +145,7 @@ async function cargar() {
   if (bad) { S.err = bad.error.message || 'error'; throw bad.error; }
   S.err = null;
   S.prods = (r[0].data || []).map(function (p) {
-    return { id: p.id, nombre: p.nombre, categoria: p.categoria, precio: Number(p.precio) || 0, costo: null, stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
+    return { id: p.id, nombre: p.nombre, categoria: p.categoria, proveedor: p.proveedor || '', precio: Number(p.precio) || 0, costo: null, stock: p.stock == null ? null : Number(p.stock), imagen: p.imagen_path || null };
   });
   S.peds = (r[1].data || []).map(mapPedido);
   S.avisos = (r[2].data || []).map(function (a) {
@@ -292,7 +293,8 @@ function drawTab() {
     fab.innerHTML = IC_PLUS + 'Nuevo cliente'; fab.hidden = false;
   } else if (S.tab === 'merc') {
     tb.innerHTML = '<input type="search" id="q" placeholder="Buscar producto" value="' + esc(S.q) + '" aria-label="Buscar productos">' +
-      '<div class="chips">' + ['todas'].concat(cats()).map(function (c) { return '<button class="chip' + (S.cat === c ? ' on' : '') + '" data-act="cat" data-v="' + esc(c) + '">' + (c === 'todas' ? 'Todas' : esc(c)) + '</button>'; }).join('') + '</div>';
+      '<div class="chips">' + ['todas'].concat(cats()).map(function (c) { return '<button class="chip' + (S.cat === c ? ' on' : '') + '" data-act="cat" data-v="' + esc(c) + '">' + (c === 'todas' ? 'Todas' : esc(c)) + '</button>'; }).join('') + '</div>' +
+      (provs().length ? '<div class="chips"><span class="chip-l">Proveedor</span>' + ['todos'].concat(provs()).map(function (c) { return '<button class="chip' + (S.prov === c ? ' on' : '') + '" data-act="prov" data-v="' + esc(c) + '">' + (c === 'todos' ? 'Todos' : esc(c)) + '</button>'; }).join('') + '</div>' : '');
     fab.innerHTML = IC_PLUS + 'Nuevo producto'; fab.hidden = !esGestor();
   } else {
     tb.innerHTML = ''; fab.hidden = true;
@@ -354,14 +356,15 @@ function stockTxt(p) {
   return '<small class="stk' + cls + '">' + (p.stock === 0 ? 'Sin stock' : 'Stock: ' + p.stock.toLocaleString('es-PY')) + '</small>';
 }
 function vMerc() {
+  if (S.prov !== 'todos' && provs().indexOf(S.prov) < 0) S.prov = 'todos';
   var q = S.q.trim().toLowerCase();
-  var l = S.prods.filter(function (p) { return (S.cat === 'todas' || (p.categoria || 'Sin categoría') === S.cat) && (!q || (p.nombre || '').toLowerCase().indexOf(q) >= 0); });
+  var l = S.prods.filter(function (p) { return (S.cat === 'todas' || (p.categoria || 'Sin categoría') === S.cat) && (S.prov === 'todos' || (p.proveedor || '') === S.prov) && (!q || ((p.nombre || '') + ' ' + (p.proveedor || '')).toLowerCase().indexOf(q) >= 0); });
   if (!l.length) return S.prods.length ? '<div class="empty">No hay productos que coincidan.</div>' :
     '<div class="empty"><span>Todavía no hay mercadería cargada. Cada producto lleva foto, categoría, precio de venta y cantidad en stock.</span>' + (esGestor() ? '<button class="btn primary" data-act="fab">Cargar el primer producto</button>' : '') + '</div>';
   var g = {}; l.forEach(function (p) { var c = p.categoria || 'Sin categoría'; (g[c] = g[c] || []).push(p); });
   return Object.keys(g).sort(function (a, b) { return a.localeCompare(b, 'es'); }).map(function (c) {
     return '<h2 class="cat-h">' + esc(c) + '</h2><div class="grid">' + g[c].sort(function (a, b) { return (a.nombre || '').localeCompare(b.nombre || '', 'es'); }).map(function (p) {
-      return '<button class="pcard" data-act="editprod" data-id="' + esc(p.id) + '">' + thumb(p) + '<span class="pc-b"><span>' + esc(p.nombre) + '</span><b>' + money(p.precio) + '</b>' + stockTxt(p) + '</span></button>';
+      return '<button class="pcard" data-act="editprod" data-id="' + esc(p.id) + '">' + thumb(p) + '<span class="pc-b"><span>' + esc(p.nombre) + '</span>' + (p.proveedor ? '<small class="prov">' + esc(p.proveedor) + '</small>' : '') + '<b>' + money(p.precio) + '</b>' + stockTxt(p) + '</span></button>';
     }).join('') + '</div>';
   }).join('');
 }
@@ -743,6 +746,7 @@ function openProdForm(p) {
       '<div id="g-img"></div>' +
       '<label class="field">Nombre<input type="text" id="g-nom" autocomplete="off" value="' + esc(p ? p.nombre : '') + '"></label>' +
       '<label class="field">Categoría<input type="text" id="g-cat" list="dl-cat" autocomplete="off" placeholder="Ej.: Bebidas" value="' + esc(p ? p.categoria : '') + '"></label>' + dlist('dl-cat', cats()) +
+      '<label class="field">Proveedor (opcional)<input type="text" id="g-prv" list="dl-prv" autocomplete="off" placeholder="Ej.: Arcor" value="' + esc(p ? p.proveedor : '') + '"></label>' + dlist('dl-prv', provs()) +
       '<label class="field">Precio de venta (Gs.)<input type="number" id="g-pre" inputmode="numeric" min="0" step="1" placeholder="Ej.: 15000" value="' + esc(p ? p.precio : '') + '"></label>' +
       (esGestor() ? '<label class="field">Precio de costo (Gs.) · lo que te cuesta comprarlo<input type="number" id="g-cos" inputmode="numeric" min="0" step="1" placeholder="Ej.: 11000" value="' + esc(p && p.costo != null ? p.costo : '') + '"></label>' +
       '<p class="muted" id="g-gan" style="margin:-6px 0 0;font-size:13px"></p>' +
@@ -779,7 +783,7 @@ function openProdForm(p) {
         var path = f.imagen || null;
         if (f.blob) path = await subirFoto('productos', f.blob);
         var stk = $g('#g-stk').value, cos = $g('#g-cos') ? $g('#g-cos').value : null;
-        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), imagen_path: path };
+        var row = { nombre: nombre, categoria: $g('#g-cat').value.trim() || 'Sin categoría', proveedor: $g('#g-prv').value.trim() || null, precio: Math.round(Number($g('#g-pre').value) || 0), stock: stk === '' ? null : Math.max(0, Math.round(Number(stk) || 0)), imagen_path: path };
         var r = p ? await sb.from('productos').update(row).eq('id', p.id) : await sb.from('productos').insert(row).select('id').single();
         if (r.error) throw r.error;
         var pidNuevo = p ? p.id : (r.data && r.data.id);
@@ -1070,6 +1074,7 @@ document.addEventListener('click', function (e) {
   if (a === 'tab') { S.tab = v; S.q = ''; drawTab(); }
   else if (a === 'filt') { S.filtro = v; drawTab(); }
   else if (a === 'cat') { S.cat = v; drawTab(); }
+  else if (a === 'prov') { S.prov = v; drawTab(); }
   else if (a === 'fab') { if (S.tab === 'merc') { if (esGestor()) openProdForm(); } else if (S.tab === 'clientes') openClienteForm(); else openPedidoForm(); }
   else if (a === 'bell') openAvisos();
   else if (a === 'close') closeSheet();
