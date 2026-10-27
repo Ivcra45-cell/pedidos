@@ -176,3 +176,7 @@ nav button{font-size:11.5px}
 .chip2.adm,.chip2.ok{background:#e3f1ea;color:var(--accent)}
 .chip2.bad{background:#fbe5e1;color:#b3261e}
 .roles{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+
+/* ganancias */
+.gan-big{font-family:var(--display);font-size:30px;font-weight:700;margin:2px 0 0;color:var(--accent);overflow-wrap:anywhere}
+.gan-big.neg,.items b.neg{color:var(--bad)}
