@@ -515,19 +515,21 @@ function openPedidoForm(p) {
       box.innerHTML = f.items.map(function (i, k) {
         return '<div class="irow"><span class="nm">' + esc(i.nombre) + '</span><button class="rm" type="button" data-k="' + k + '" data-op="rm" aria-label="Quitar ' + esc(i.nombre) + '">✕</button>' +
           '<div class="ctl"><input type="number" inputmode="numeric" min="0" step="1" data-k="' + k + '" data-op="pr" value="' + esc(i.precio) + '" aria-label="Precio de ' + esc(i.nombre) + '">' +
-          '<div class="step"><button type="button" data-k="' + k + '" data-op="dec" aria-label="Menos">−</button><span id="q' + k + '">' + i.cant + '</span><button type="button" data-k="' + k + '" data-op="inc" aria-label="Más">+</button></div>' +
+          '<div class="step"><button type="button" data-k="' + k + '" data-op="dec" aria-label="Menos">−</button><input type="number" class="qin" id="q' + k + '" inputmode="numeric" min="1" step="1" data-k="' + k + '" data-op="qt" value="' + i.cant + '" aria-label="Cantidad de ' + esc(i.nombre) + '"><button type="button" data-k="' + k + '" data-op="inc" aria-label="Más">+</button></div>' +
           '<span class="st" id="s' + k + '">' + money(i.precio * i.cant) + '</span></div></div>';
       }).join('');
       paintTotal();
     }
-    function upd(k) { var i = f.items[k]; var q = $f('#q' + k), s = $f('#s' + k); if (q) q.textContent = i.cant; if (s) s.textContent = money((Number(i.precio) || 0) * i.cant); paintTotal(); }
+    function upd(k) { var i = f.items[k]; var q = $f('#q' + k), s = $f('#s' + k); if (q && document.activeElement !== q) q.value = i.cant; if (s) s.textContent = money((Number(i.precio) || 0) * i.cant); paintTotal(); }
     $f('#f-items').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-op]'); if (!b) return; var k = Number(b.dataset.k), op = b.dataset.op, i = f.items[k];
       if (op === 'rm') { f.items.splice(k, 1); paintItems(); }
       else if (op === 'inc') { i.cant += 1; upd(k); }
       else if (op === 'dec') { i.cant = Math.max(1, i.cant - 1); upd(k); }
     });
-    $f('#f-items').addEventListener('input', function (e) { var t = e.target; if (t.dataset && t.dataset.op === 'pr') { var k = Number(t.dataset.k); f.items[k].precio = Math.round(Number(t.value) || 0); upd(k); } });
+    $f('#f-items').addEventListener('input', function (e) { var t = e.target; if (t.dataset && t.dataset.op === 'qt') { var kq = Number(t.dataset.k), nq = Math.floor(Number(t.value)); if (nq >= 1) { f.items[kq].cant = Math.min(nq, 999999); upd(kq); } return; } if (t.dataset && t.dataset.op === 'pr') { var k = Number(t.dataset.k); f.items[k].precio = Math.round(Number(t.value) || 0); upd(k); } });
+    $f('#f-items').addEventListener('focusin', function (e) { if (e.target.dataset && e.target.dataset.op === 'qt') e.target.select(); });
+    $f('#f-items').addEventListener('focusout', function (e) { var t = e.target; if (t.dataset && t.dataset.op === 'qt') t.value = f.items[Number(t.dataset.k)].cant; });
     function addItem(it) {
       var ex = f.items.find(function (x) { return it.pid ? x.pid === it.pid : (!x.pid && x.nombre === it.nombre); });
       if (ex) ex.cant += 1; else f.items.push(it); paintItems();

@@ -189,3 +189,5 @@ nav button{font-size:11.5px}
 .items li>b small{display:block;font-weight:500;font-size:12px;color:var(--accent);text-align:right}
 .items li>b small.neg{color:var(--bad)}
 .items li>span strong{font-weight:600;overflow-wrap:anywhere}
+
+.step input.qin{width:64px;min-height:44px;text-align:center;padding:6px 4px;font-weight:600;font-variant-numeric:tabular-nums}
