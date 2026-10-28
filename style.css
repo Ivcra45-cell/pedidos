@@ -191,3 +191,20 @@ nav button{font-size:11.5px}
 .items li>span strong{font-weight:600;overflow-wrap:anywhere}
 
 .step input.qin{width:64px;min-height:44px;text-align:center;padding:6px 4px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* más pedidos */
+.topnav{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.topnav b{flex:1;text-align:center}
+.topnav .btn{width:48px;padding:0;font-size:22px}
+.toplist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.toplist li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.toplist li:last-child{border-bottom:none}
+.toplist .rk{flex:none;width:26px;height:26px;border-radius:50%;background:var(--surface2);color:var(--muted);display:grid;place-items:center;font-size:12px;font-weight:700}
+.toplist li:nth-child(-n+3) .rk{background:var(--accent);color:var(--accent-fg)}
+.toplist .tn{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.toplist .tn strong{font-weight:600;overflow-wrap:anywhere}
+.toplist .tn small{color:var(--muted);font-size:12px}
+.toplist .tn i{display:block;height:4px;border-radius:2px;background:var(--accent-soft);box-shadow:inset 0 0 0 100px var(--accent-soft);position:relative}
+.toplist .tn i::after{content:"";position:absolute;inset:0;border-radius:2px;background:var(--accent);opacity:.55}
+.toplist>li>b{flex:none;text-align:right;font-variant-numeric:tabular-nums;font-size:17px}
+.toplist>li>b small{display:block;font-weight:500;font-size:11px;color:var(--muted)}

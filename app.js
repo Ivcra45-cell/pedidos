@@ -390,6 +390,7 @@ function vAjustes() {
     (esGestor() ? '<label class="field">Nombre del negocio (sale en el catálogo y en los PDF)<input type="text" id="biz" placeholder="Ej.: Dulce Capricho"></label>' :
       '<p class="muted" style="margin:0">Nombre del negocio: <b>' + esc(S.cfg.nombre || 'sin nombre') + '</b></p>') + '</div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ganancias y ventas</h2><p class="muted" style="margin:0;font-size:13px">Lo vendido por día, semana o mes, la ganancia y la lista de ventas con la hora en que se hicieron y se entregaron.</p><button class="btn primary" data-act="gan">Ver ganancias y ventas</button></div>' +
+    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Productos más pedidos</h2><p class="muted" style="margin:0;font-size:13px">Ranking de lo que más se pidió en el día, la semana o el mes.</p><button class="btn primary" data-act="top">Ver productos más pedidos</button></div>' +
     (esAdmin() ? '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Administración</h2><p class="muted" style="margin:0;font-size:13px">Cuentas de la app: agregar personas, asignar roles, bloquear y cambiar contraseñas. Solo lo ves vos.</p><button class="btn" data-act="admin">Administrar cuentas</button></div>' : '') +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ticket</h2><label class="field">Ancho del papel de la impresora<select id="tkw"><option value="80"' + (ls('tkw') === '58' ? '' : ' selected') + '>80 mm (el más común)</option><option value="58"' + (ls('tkw') === '58' ? ' selected' : '') + '>58 mm (angosto)</option></select></label></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">En este teléfono</h2>' + inst + '</div>' +
@@ -1071,6 +1072,59 @@ function openGanancias() {
     load();
   }, 'Volver');
 }
+/* ---------- productos más pedidos ---------- */
+function openTop() {
+  var g = 'dia', off = 0, solo = false;
+  openSheet('Más pedidos', function (rec) {
+    var ymd = function (d) { return d.toLocaleDateString('en-CA'); };
+    function rango() {
+      var n = new Date(), a, b;
+      if (g === 'dia') { a = new Date(n.getFullYear(), n.getMonth(), n.getDate() + off); b = a; }
+      else if (g === 'semana') { a = new Date(n.getFullYear(), n.getMonth(), n.getDate() - ((n.getDay() + 6) % 7) + off * 7); b = new Date(a.getFullYear(), a.getMonth(), a.getDate() + 6); }
+      else { a = new Date(n.getFullYear(), n.getMonth() + off, 1); b = new Date(a.getFullYear(), a.getMonth() + 1, 0); }
+      return { a: a, b: b, d: ymd(a), h: ymd(b) };
+    }
+    function etiqueta(r) {
+      var f = function (d, o) { return d.toLocaleDateString('es-PY', o); };
+      if (g === 'dia') return off === 0 ? 'Hoy' : off === -1 ? 'Ayer' : f(r.a, { weekday: 'long', day: 'numeric', month: 'long' });
+      if (g === 'semana') return (off === 0 ? 'Esta semana · ' : '') + f(r.a, { day: 'numeric', month: 'short' }) + ' al ' + f(r.b, { day: 'numeric', month: 'short' });
+      return f(r.a, { month: 'long', year: 'numeric' });
+    }
+    function paint() {
+      var r = rango(), m = {}, np = 0;
+      S.peds.forEach(function (p) {
+        if (p.estado === 'cancelado' || (solo && p.estado !== 'entregado') || p.fecha < r.d || p.fecha > r.h) return;
+        np++;
+        var vistos = {};
+        p.items.forEach(function (i) {
+          var k = i.pid || ('n:' + String(i.nombre).trim().toLowerCase());
+          var o = m[k] = m[k] || { nombre: i.nombre, cant: 0, monto: 0, peds: 0 };
+          o.cant += Number(i.cant) || 0; o.monto += (Number(i.precio) || 0) * (Number(i.cant) || 0);
+          if (!vistos[k]) { vistos[k] = 1; o.peds++; }
+        });
+      });
+      var l = Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.cant - a.cant || b.monto - a.monto || a.nombre.localeCompare(b.nombre, 'es'); });
+      var max = l.length ? l[0].cant : 1;
+      rec.body.innerHTML =
+        '<div class="seg-w">' + [['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes']].map(function (x) { return '<button class="seg' + (g === x[0] ? ' on' : '') + '" data-g="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="topnav"><button class="btn" data-n="-1" aria-label="Anterior">‹</button><b>' + esc((function (t) { return t.charAt(0).toUpperCase() + t.slice(1); })(etiqueta(r))) + '</b><button class="btn" data-n="1" aria-label="Siguiente"' + (off >= 0 ? ' disabled' : '') + '>›</button></div>' +
+        '<div class="box checks"><label><input type="checkbox" id="top-solo"' + (solo ? ' checked' : '') + '>Contar solo pedidos entregados</label></div>' +
+        '<p class="muted" style="margin:0;font-size:13px">' + np + ' pedido' + (np === 1 ? '' : 's') + ' · ' + l.length + ' producto' + (l.length === 1 ? '' : 's') + ' distinto' + (l.length === 1 ? '' : 's') + '</p>' +
+        (l.length ? '<div class="box"><ol class="toplist">' + l.map(function (o, k) {
+          return '<li><span class="rk">' + (k + 1) + '</span><span class="tn"><strong>' + esc(o.nombre) + '</strong><small>' + o.peds + ' pedido' + (o.peds === 1 ? '' : 's') + ' · ' + money(o.monto) + '</small><i style="width:' + Math.max(4, Math.round(o.cant / max * 100)) + '%"></i></span><b>' + o.cant.toLocaleString('es-PY') + '<small>unid.</small></b></li>';
+        }).join('') + '</ol></div>' : '<div class="empty">No hay pedidos en este período.</div>') +
+        (S.peds.length >= 500 ? '<p class="muted" style="margin:0;font-size:12px">Se calcula con los 500 pedidos más recientes.</p>' : '') +
+        '<p class="muted" style="margin:0;font-size:12px">Cuenta pendientes y entregados por la fecha del pedido; los cancelados no cuentan.</p>';
+    }
+    rec.body.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.g && b.dataset.g !== g) { g = b.dataset.g; off = 0; paint(); }
+      else if (b.dataset.n && !b.disabled) { off = Math.min(0, off + Number(b.dataset.n)); paint(); }
+    });
+    rec.body.addEventListener('change', function (e) { if (e.target.id === 'top-solo') { solo = e.target.checked; paint(); } });
+    paint();
+  }, 'Volver');
+}
 async function setEstado(p, est) {
   if (p.estado === est) return;
   var r = await sb.rpc('cambiar_estado', { p_id: p.id, p_estado: est, p_por_nombre: me.nombre });
@@ -1115,6 +1169,7 @@ document.addEventListener('click', function (e) {
   else if (a === 'instalar') { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; drawList(); } }
   else if (a === 'admin') { if (esAdmin()) openAdmin(); }
   else if (a === 'gan') openGanancias();
+  else if (a === 'top') openTop();
 });
 document.addEventListener('input', function (e) { var t = e.target; if (t.id === 'q') { S.q = t.value; drawList(); } });
 document.addEventListener('change', function (e) {
