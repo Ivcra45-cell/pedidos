@@ -389,7 +389,8 @@ function vAjustes() {
   return '<div class="ajuste-sec"><h2 class="sec">Negocio</h2>' +
     (esGestor() ? '<label class="field">Nombre del negocio (sale en el catálogo y en los PDF)<input type="text" id="biz" placeholder="Ej.: Dulce Capricho"></label>' :
       '<p class="muted" style="margin:0">Nombre del negocio: <b>' + esc(S.cfg.nombre || 'sin nombre') + '</b></p>') + '</div>' +
-    (esAdmin() ? '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Administración</h2><p class="muted" style="margin:0;font-size:13px">Ganancias del negocio y cuentas de la app (agregar personas, asignar roles, bloquear y cambiar contraseñas). Solo lo ves vos.</p><button class="btn primary" data-act="gan">Ver ganancias</button><button class="btn" data-act="admin">Administrar cuentas</button></div>' : '') +
+    '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ganancias y ventas</h2><p class="muted" style="margin:0;font-size:13px">Lo vendido por día, semana o mes, la ganancia y la lista de ventas con la hora en que se hicieron y se entregaron.</p><button class="btn primary" data-act="gan">Ver ganancias y ventas</button></div>' +
+    (esAdmin() ? '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Administración</h2><p class="muted" style="margin:0;font-size:13px">Cuentas de la app: agregar personas, asignar roles, bloquear y cambiar contraseñas. Solo lo ves vos.</p><button class="btn" data-act="admin">Administrar cuentas</button></div>' : '') +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ticket</h2><label class="field">Ancho del papel de la impresora<select id="tkw"><option value="80"' + (ls('tkw') === '58' ? '' : ' selected') + '>80 mm (el más común)</option><option value="58"' + (ls('tkw') === '58' ? ' selected' : '') + '>58 mm (angosto)</option></select></label></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">En este teléfono</h2>' + inst + '</div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><p class="muted" style="margin:0">Tu rol: <b>' + esc(ROLES[me.rol] || me.rol) + '</b></p><p class="muted" style="margin:0;font-size:12px">Versión de la app: 27/10 · ganancias</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
@@ -1001,7 +1002,7 @@ function openFormato(p, imprimir) {
 }
 
 /* ---------- acciones ---------- */
-/* ---------- ganancias (solo administrador) ---------- */
+/* ---------- ganancias y ventas (todas las cuentas) ---------- */
 function openGanancias() {
   var g = 'dia';
   openSheet('Ganancias', function (rec) {
@@ -1027,7 +1028,8 @@ function openGanancias() {
         return '<button class="seg' + (g === x[0] ? ' on' : '') + '" data-g="' + x[0] + '">' + x[1] + '</button>';
       }).join('') + '</div>';
     }
-    function paint(data) {
+    var fdt = function (t) { return new Date(t).toLocaleString('es-PY', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+    function paint(data, ventas) {
       var rows = data.map(function (r) {
         return { f: String(r.periodo).slice(0, 10), n: Number(r.pedidos) || 0, v: Number(r.ventas) || 0, c: Number(r.costo) || 0, gn: Number(r.ganancia) || 0, sc: Number(r.items_sin_costo) || 0 };
       });
@@ -1039,18 +1041,26 @@ function openGanancias() {
       rec.body.innerHTML = tabs() +
         '<div class="box"><p class="muted" style="margin:0">' + TIT[g] + '</p><p class="gan-big' + gcls(cur.gn) + '">' + money(cur.gn) + '</p><p class="muted" style="margin:0;font-size:13px">de ganancia</p>' +
         '<ul class="items" style="margin-top:8px"><li><span>Total vendido</span><b>' + money(cur.v) + '</b></li><li><span>Costo de la mercadería</span><b>' + money(cur.c) + '</b></li><li><span>Pedidos entregados</span><b>' + cur.n + '</b></li><li><span>Margen</span><b>' + margen + '</b></li></ul></div>' +
-        (sinCosto ? '<div class="warnbox">' + sinCosto + ' producto' + (sinCosto === 1 ? '' : 's') + ' vendido' + (sinCosto === 1 ? '' : 's') + ' en este rango no tiene' + (sinCosto === 1 ? '' : 'n') + ' costo cargado, así que su ganancia sale completa. Cargá el costo en Mercadería para que el cálculo sea real.</div>' : '') +
+        (sinCosto && esGestor() ? '<div class="warnbox">' + sinCosto + ' producto' + (sinCosto === 1 ? '' : 's') + ' vendido' + (sinCosto === 1 ? '' : 's') + ' en este rango no tiene' + (sinCosto === 1 ? '' : 'n') + ' costo cargado, así que su ganancia sale completa. Cargá el costo en Mercadería para que el cálculo sea real.</div>' : '') +
+        '<h3 class="sec">Ventas ' + (g === 'dia' ? 'de hoy' : g === 'semana' ? 'de esta semana' : 'de este mes') + '</h3>' +
+        (ventas.length ? '<div class="box"><ul class="items">' + ventas.map(function (v) {
+          var gn = Number(v.ganancia) || 0;
+          return '<li><span><strong>#' + esc(v.numero) + ' · ' + esc(v.cliente) + '</strong><small>Pedido hecho: ' + esc(fdt(v.creado_en)) + (v.cargado_por ? ' · ' + esc(v.cargado_por) : '') + '</small><small>Entregado: ' + esc(fdt(v.entregado_en)) + '</small></span><b>' + money(v.total) + '<small class="' + gcls(gn).trim() + '">ganancia ' + money(gn) + '</small></b></li>';
+        }).join('') + '</ul>' + (ventas.length >= 300 ? '<p class="muted" style="font-size:12px;margin:6px 0 0">Se muestran las 300 ventas más recientes.</p>' : '') + '</div>' : '<p class="muted" style="margin:0">Todavía no hay ventas entregadas en este período.</p>') +
         '<h3 class="sec">Períodos anteriores</h3>' +
         (prev.length ? '<div class="box"><ul class="items">' + prev.map(function (r) {
           return '<li><span>' + esc(etiqueta(r.f)) + '<small>' + r.n + ' pedido' + (r.n === 1 ? '' : 's') + ' · vendido ' + money(r.v) + ' · costo ' + money(r.c) + '</small></span><b class="' + gcls(r.gn).trim() + '">' + money(r.gn) + '</b></li>';
         }).join('') + '</ul></div>' : '<p class="muted" style="margin:0">Todavía no hay ventas entregadas en períodos anteriores.</p>') +
-        '<p class="muted" style="margin:0;font-size:12px">Solo cuentan los pedidos en estado Entregado. La ganancia es precio de venta menos precio de costo actual de cada producto.</p>';
+        '<p class="muted" style="margin:0;font-size:12px">Solo cuentan los pedidos en estado Entregado; la hora de entrega es cuando se marcó así. La ganancia es precio de venta menos precio de costo actual de cada producto.</p>';
     }
     async function load() {
       rec.body.innerHTML = tabs() + '<p class="muted">Cargando…</p>';
-      var r = await sb.rpc('resumen_ganancias', { p_desde: desde(), p_hasta: hoy(), p_agrupar: g });
+      var gq = g;
+      var rs = await Promise.all([sb.rpc('resumen_ganancias', { p_desde: desde(), p_hasta: hoy(), p_agrupar: g }), sb.rpc('ventas_detalle', { p_desde: claveActual(), p_hasta: hoy() })]);
+      if (gq !== g) return;
+      var r = rs[0].error ? rs[0] : rs[1].error ? rs[1] : rs[0];
       if (r.error) { rec.body.innerHTML = tabs() + '<div class="empty">' + esc(errMsg(r.error, 'No se pudieron calcular las ganancias. Revisá la conexión y probá de nuevo.')) + '</div>'; return; }
-      paint(r.data || []);
+      paint(r.data || [], rs[1].data || []);
     }
     rec.body.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-g]'); if (!b || b.dataset.g === g) return;
@@ -1102,7 +1112,7 @@ document.addEventListener('click', function (e) {
   else if (a === 'logout') salir();
   else if (a === 'instalar') { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; drawList(); } }
   else if (a === 'admin') { if (esAdmin()) openAdmin(); }
-  else if (a === 'gan') { if (esAdmin()) openGanancias(); }
+  else if (a === 'gan') openGanancias();
 });
 document.addEventListener('input', function (e) { var t = e.target; if (t.id === 'q') { S.q = t.value; drawList(); } });
 document.addEventListener('change', function (e) {
