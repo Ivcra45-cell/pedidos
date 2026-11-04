@@ -60,6 +60,7 @@ function errMsg(e, def) {
   return def;
 }
 function show(id) {
+  if (ax) ax.hidden = true;
   ['login', 'denied', 'app'].forEach(function (k) { $('#' + k).hidden = (k !== id); });
   $('nav').hidden = (id !== 'app');
   $('#fab').hidden = (id !== 'app');
@@ -193,6 +194,63 @@ function suscribir() {
     .subscribe();
   document.addEventListener('visibilitychange', function () { if (!document.hidden) recargar(); });
   window.addEventListener('online', recargar);
+}
+
+/* ---------- pantallas del enlace del correo ---------- */
+var ax = null;
+var URLP = (function () {
+  var p = new URLSearchParams(String(location.hash || '').replace(/^#/, '')), q = new URLSearchParams(location.search || '');
+  var g = function (k) { return p.get(k) || q.get(k) || ''; };
+  return { tipo: g('type'), err: g('error_code') || g('error'), desc: g('error_description') };
+})();
+function axShow(html) {
+  if (!ax) { ax = document.createElement('section'); ax.id = 'authx'; document.body.appendChild(ax); }
+  ax.hidden = false; ax.innerHTML = '<div class="auth axc">' + html + '</div>';
+  ['login', 'denied', 'app'].forEach(function (k) { $('#' + k).hidden = true; });
+  $('nav').hidden = true; $('#fab').hidden = true; window.scrollTo(0, 0);
+  return ax;
+}
+var AX_OK = '<div class="axi ok"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>';
+var AX_KEY = '<div class="axi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg></div>';
+var AX_BAD = '<div class="axi bad"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg></div>';
+function limpiarUrl() { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+async function axContinuar() {
+  var ss = await sb.auth.getSession();
+  if (ss.data && ss.data.session) { axHide(); await entrar(ss.data.session); } else { axHide(); show('login'); setAuthMode('in'); }
+}
+function axHide() { if (ax) ax.hidden = true; }
+function pantallaConfirmado() {
+  axShow(AX_OK + '<h1 class="auth-t">¡Correo confirmado!</h1><p class="muted">Tu cuenta ya está verificada. Ya podés usar la app.</p><button class="btn primary" id="ax-go" type="button">Continuar</button>');
+  $('#ax-go').addEventListener('click', axContinuar);
+}
+function pantallaVencido() {
+  axShow(AX_BAD + '<h1 class="auth-t">El enlace ya no sirve</h1><p class="muted">Venció o ya se usó. Los enlaces del correo duran poco y sirven una sola vez.</p><p class="muted">Entrá a la app y tocá «Olvidé mi contraseña» para recibir uno nuevo.</p><button class="btn primary" id="ax-go" type="button">Ir a iniciar sesión</button>');
+  $('#ax-go').addEventListener('click', function () { axHide(); show('login'); setAuthMode('in'); });
+}
+function pantallaNuevaClave() {
+  var w = axShow(AX_KEY + '<h1 class="auth-t">Elegí tu nueva contraseña</h1><p class="muted">Escribila dos veces para estar seguro. Tiene que tener al menos 6 caracteres.</p>' +
+    '<form id="ax-form" autocomplete="off"><label class="field">Nueva contraseña<input type="password" id="ax-p1" autocomplete="new-password" minlength="6" required></label>' +
+    '<label class="field">Repetí la contraseña<input type="password" id="ax-p2" autocomplete="new-password" minlength="6" required></label>' +
+    '<label class="axv"><input type="checkbox" id="ax-ver"> Mostrar contraseña</label><div class="err" id="ax-msg" role="alert"></div>' +
+    '<button class="btn primary" id="ax-save" type="submit">Guardar contraseña</button></form>');
+  var $x = function (q) { return w.querySelector(q); };
+  $x('#ax-ver').addEventListener('change', function (e) { $x('#ax-p1').type = $x('#ax-p2').type = e.target.checked ? 'text' : 'password'; });
+  $x('#ax-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var a = $x('#ax-p1').value, b = $x('#ax-p2').value, msg = $x('#ax-msg'), btn = $x('#ax-save'); msg.textContent = '';
+    if (a.length < 6) { msg.textContent = 'La contraseña tiene que tener al menos 6 caracteres.'; return; }
+    if (a !== b) { msg.textContent = 'Las dos contraseñas no coinciden.'; $x('#ax-p2').focus(); return; }
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      var r = await sb.auth.updateUser({ password: a });
+      if (r.error) throw r.error;
+      axShow(AX_OK + '<h1 class="auth-t">¡Contraseña actualizada!</h1><p class="muted">Ya podés entrar con tu nueva contraseña.</p><button class="btn primary" id="ax-go" type="button">Entrar a la app</button>');
+      $('#ax-go').addEventListener('click', axContinuar);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Guardar contraseña';
+      msg.textContent = /same.*password|different from the old/i.test((err && err.message) || '') ? 'Elegí una contraseña distinta a la anterior.' : /session|JWT|expired/i.test((err && err.message) || '') ? 'El enlace venció. Pedí uno nuevo desde «Olvidé mi contraseña».' : traducir(err);
+    }
+  });
 }
 
 /* ---------- acceso (login) ---------- */
@@ -392,6 +450,7 @@ function vAjustes() {
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ganancias y ventas</h2><p class="muted" style="margin:0;font-size:13px">Lo vendido por día, semana o mes, la ganancia y la lista de ventas con la hora en que se hicieron y se entregaron.</p><button class="btn primary" data-act="gan">Ver ganancias y ventas</button></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Productos más pedidos</h2><p class="muted" style="margin:0;font-size:13px">Ranking de lo que más se pidió en el día, la semana o el mes.</p><button class="btn primary" data-act="top">Ver productos más pedidos</button></div>' +
     (esAdmin() ? '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Administración</h2><p class="muted" style="margin:0;font-size:13px">Cuentas de la app: agregar personas, asignar roles, bloquear y cambiar contraseñas. Solo lo ves vos.</p><button class="btn" data-act="admin">Administrar cuentas</button></div>' : '') +
+    '<div class="ajuste-sec kbd-only" style="margin-top:22px"><h2 class="sec">Teclado (en computadora)</h2><p class="muted" style="margin:0;font-size:13px;line-height:1.7"><kbd>Tab</kbd> y <kbd>Shift</kbd>+<kbd>Tab</kbd> para moverte, <kbd>Enter</kbd> o <kbd>Espacio</kbd> para tocar un botón.<br><kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>… cambian de pestaña (en el orden de la barra) · <kbd>N</kbd> crea uno nuevo · <kbd>/</kbd> busca · <kbd>B</kbd> abre los avisos.<br><kbd>Esc</kbd> cierra la pantalla abierta. En un formulario, <kbd>Enter</kbd> guarda.</p></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Ticket</h2><label class="field">Ancho del papel de la impresora<select id="tkw"><option value="80"' + (ls('tkw') === '58' ? '' : ' selected') + '>80 mm (el más común)</option><option value="58"' + (ls('tkw') === '58' ? ' selected' : '') + '>58 mm (angosto)</option></select></label></div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">En este teléfono</h2>' + inst + '</div>' +
     '<div class="ajuste-sec" style="margin-top:22px"><h2 class="sec">Cuenta</h2><p class="muted" style="margin:0">Sesión iniciada como ' + esc(me.email) + '</p><p class="muted" style="margin:0">Tu rol: <b>' + esc(ROLES[me.rol] || me.rol) + '</b></p><p class="muted" style="margin:0;font-size:12px">Versión de la app: 27/10 · ganancias</p><button class="btn" data-act="logout">Cerrar sesión</button></div>';
@@ -404,9 +463,27 @@ function openSheet(title, build, backLabel) {
   el.querySelector('h2').textContent = title;
   document.body.appendChild(el); document.body.classList.add('lock');
   var rec = { el: el, body: el.querySelector('.sh-body'), setTitle: function (t) { el.querySelector('h2').textContent = t; } };
-  stack.push(rec); build(rec); return rec;
+  rec.prev = document.activeElement;
+  stack.push(rec); syncInert(); build(rec); enfocar(rec); return rec;
 }
-function closeSheet() { var r = stack.pop(); if (r) { r.el.remove(); if (r.onClose) r.onClose(); } if (!stack.length) document.body.classList.remove('lock'); }
+function closeSheet() {
+  var r = stack.pop(); if (r) { r.el.remove(); if (r.onClose) r.onClose(); }
+  if (!stack.length) document.body.classList.remove('lock');
+  syncInert();
+  if (r && r.prev && document.contains(r.prev) && !r.prev.disabled) { try { r.prev.focus({ preventScroll: true }); } catch (e) {} }
+}
+/* teclado: el fondo no se puede recorrer con Tab mientras hay una hoja abierta */
+function syncInert() {
+  stack.forEach(function (r, i) { r.el.inert = i < stack.length - 1; });
+  ['app', 'fab'].forEach(function (k) { var x = document.getElementById(k); if (x) x.inert = stack.length > 0; });
+  var nv = document.querySelector('nav'); if (nv) nv.inert = stack.length > 0;
+}
+function enfocar(rec) {
+  if (!window.matchMedia || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  var f = rec.body.querySelector('input:not([type=file]):not([type=checkbox]):not(.hid), select, textarea');
+  if (f) { try { f.focus({ preventScroll: true }); } catch (e) {} return; }
+  rec.el.tabIndex = -1; try { rec.el.focus({ preventScroll: true }); } catch (e) {}
+}
 
 function detailHTML(p, rec) {
   var items = p.items.map(function (i) { return '<li><span>' + esc(i.nombre) + '<small>' + i.cant + ' × ' + money(i.precio) + (i.desc > 0 ? ' · stock −' + i.desc : '') + '</small></span><b>' + money(i.cant * i.precio) + '</b></li>'; }).join('');
@@ -1185,17 +1262,45 @@ document.addEventListener('change', function (e) {
 });
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; if (S.tab === 'ajustes' && S.ok) drawList(); });
 
+/* ---------- teclado ---------- */
+document.addEventListener('keydown', function (e) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  var t = e.target, tag = t && t.tagName, escribiendo = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable);
+  if (e.key === 'Escape') {
+    if (stack.length) { e.preventDefault(); closeSheet(); }
+    else if (escribiendo && t.type === 'search' && t.value) { t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); }
+    return;
+  }
+  if (e.key === 'Enter' && stack.length && tag === 'INPUT' && !e.defaultPrevented && !t.list && !t.dataset.op && !/^(checkbox|radio|file|button|submit)$/.test(t.type)) {
+    var top = stack[stack.length - 1], go = top.body.querySelector('.btn.primary:not([disabled])');
+    if (go) { e.preventDefault(); go.click(); }
+    return;
+  }
+  if (escribiendo || stack.length || !$('#app') || $('#app').hidden || (ax && !ax.hidden)) return;
+  if (e.key === '/') { var q = $('#q'); if (q) { e.preventDefault(); q.focus(); q.select(); } }
+  else if (e.key === 'n' || e.key === 'N') { var fb = $('#fab'); if (fb && !fb.hidden) { e.preventDefault(); fb.click(); } }
+  else if (e.key === 'b' || e.key === 'B') { var bl = $('#bell'); if (bl) { e.preventDefault(); bl.click(); } }
+  else if (/^[1-9]$/.test(e.key)) {
+    var tabs = Array.prototype.filter.call(document.querySelectorAll('nav button[data-act=tab]'), function (x) { return !x.hidden; });
+    var tb = tabs[Number(e.key) - 1]; if (tb) { e.preventDefault(); tb.click(); }
+  }
+});
+
 /* ---------- arranque ---------- */
 $('#auth-form').addEventListener('submit', onAuthSubmit);
 $('#a-toggle').addEventListener('click', function () { setAuthMode(authMode === 'in' ? 'up' : 'in'); });
 $('#a-forgot').addEventListener('click', onForgot);
 $('#denied-out').addEventListener('click', salir);
-sb.auth.onAuthStateChange(function (ev) { if (ev === 'PASSWORD_RECOVERY') { show('login'); setAuthMode('newpass'); } });
+sb.auth.onAuthStateChange(function (ev) { if (ev === 'PASSWORD_RECOVERY') { axPendiente = true; limpiarUrl(); pantallaNuevaClave(); } });
+var axPendiente = false;
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
 (async function () {
   setAuthMode('in');
+  if (URLP.err) { limpiarUrl(); pantallaVencido(); return; }
   var r = await sb.auth.getSession();
-  if (authMode === 'newpass') return;
+  if (axPendiente) return;
+  if (URLP.tipo === 'recovery' && r.data && r.data.session) { limpiarUrl(); pantallaNuevaClave(); return; }
+  if (URLP.tipo === 'signup' || URLP.tipo === 'email_change' || URLP.tipo === 'invite') { limpiarUrl(); pantallaConfirmado(); return; }
   if (r.data && r.data.session) await entrar(r.data.session); else show('login');
 })();
 })();
